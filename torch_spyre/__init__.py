@@ -152,6 +152,8 @@ def _autoload():
     torch.utils.rename_privateuse1_backend(DEVICE_NAME)
     torch._register_device_module(DEVICE_NAME, make_spyre_module())
 
+    import torch_spyre.ops  # noqa: F401
+
     # set the default backend debugging to quiet
     # enable these if you would like to see runtime/compiler logging
     os.environ.setdefault("TORCH_SENDNN_LOG", "CRITICAL")
