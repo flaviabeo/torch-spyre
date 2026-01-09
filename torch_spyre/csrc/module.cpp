@@ -15,6 +15,8 @@
  */
 
 #include "module.h"
+#include <filesystem>
+#include <iostream>
 
 #include <c10/core/ScalarType.h>
 #include <pybind11/native_enum.h>
@@ -151,6 +153,17 @@ void launchKernel(std::string g2_path, std::vector<at::Tensor> args) {
   status = gl.ParseGraph();
   if (!status.IsOk()) throw std::runtime_error(status.Message());
 
+  // Remove deeptools ipPatch.txt temporary file
+  try {
+        if (std::filesystem::remove("ipPatch.txt")) {
+            std::cout << "File deleted successfully\n";
+        } else {
+            std::cout << "File does not exist\n";
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+    }
+  
   // Create sendnn tensors
   std::vector<sendnn::ConstTensor> sen_inputs;
   std::vector<sendnn::Tensor> sen_outputs;

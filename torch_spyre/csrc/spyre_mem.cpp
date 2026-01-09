@@ -39,6 +39,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <filesystem>
+#include <iostream>
 
 #include "logging.h"
 #include "module.h"
@@ -375,6 +377,16 @@ auto create_dma_graph(const at::Tensor& self, const at::Tensor& dst,
     SEN_THROW_NOK(gl->CompileGraph());
     SEN_THROW_NOK(gl->ParseGraph());
   }
+  // Remove deeptools ipPatch.txt temporary file
+  try {
+        if (std::filesystem::remove("ipPatch.txt")) {
+            std::cout << "File deleted successfully\n";
+        } else {
+            std::cout << "File does not exist\n";
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+    }
   return gl;
 }
 auto copy_host_to_device(const at::Tensor& self, const at::Tensor& dst) {
