@@ -177,6 +177,91 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
   return output;  // Return immediately without waiting
 }
 
+// Async all_gather implementation - returns immediately
+at::Tensor spyre_allgather_async_impl(const at::Tensor& input,
+                                      int64_t group_size,
+                                      const std::string& group_name) {
+  DEBUGINFO("spyre::all_gather_async called with group_size=", group_size,
+            ", group=", group_name);
+
+  // Get world context
+  auto context = spyre_comms::get_world_context();
+  if (context == nullptr) {
+    DEBUGINFO("Initializing spyre-comms library");
+    spyre_comms::initialize_library(flex::getFlexRuntimeContext(),
+                                    spyre::getDefaultStreamRuntimeHandle());
+    context = spyre_comms::get_world_context();
+    TORCH_CHECK(context != nullptr, "Failed to get spyre-comms world context");
+  }
+
+  TORCH_CHECK(
+      group_size > 0 && group_size <= static_cast<int64_t>(context->getSize()),
+      "group_size out of range: ", group_size, " (world size is ",
+      context->getSize(), ")");
+
+  // Create output tensor: shape[0] * group_size along dim 0
+  auto output_sizes = input.sizes().vec();
+  output_sizes[0] *= group_size;
+  at::Tensor output = at::empty(output_sizes, input.options());
+  TORCH_CHECK(output.nbytes() > 0,
+              "Tensor must have non-zero size for all_gather");
+
+  // Get SharedOwnerCtx for map key (stable per-allocation identity)
+  auto* ctx = static_cast<spyre::SharedOwnerCtx*>(
+      output.storage().data_ptr().get_context());
+  TORCH_CHECK(ctx != nullptr, "SharedOwnerCtx is null for output tensor");
+
+  // Convert PyTorch tensor metadata to spyre_comms format
+  spyre_comms::TensorDataTypeEnum dtype =
+      torch_dtype_to_spyre_comms(input.scalar_type());
+
+  // Input tensor info and spyre_comms tensor
+  std::vector<int64_t> input_shape_vec;
+  for (int64_t i = 0; i < input.dim(); i++) {
+    input_shape_vec.push_back(input.size(i));
+  }
+  spyre_comms::TensorShape input_shape(input_shape_vec);
+  spyre_comms::TensorInfo input_info(dtype, input_shape);
+
+  auto* input_ctx = static_cast<spyre::SharedOwnerCtx*>(
+      input.storage().data_ptr().get_context());
+  TORCH_CHECK(input_ctx != nullptr, "SharedOwnerCtx is null for input tensor");
+
+  spyre_comms::Tensor input_tensor(input_info);
+  input_tensor.SetSpyreDeviceAddressBorrowed(&input_ctx->composite_addr);
+
+  // Output tensor info and spyre_comms tensor (single contiguous buffer)
+  std::vector<int64_t> output_shape_vec;
+  for (int64_t i = 0; i < output.dim(); i++) {
+    output_shape_vec.push_back(output.size(i));
+  }
+  spyre_comms::TensorShape output_shape(output_shape_vec);
+  spyre_comms::TensorInfo output_info(dtype, output_shape);
+
+  spyre_comms::Tensor output_tensor(output_info);
+  output_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
+
+  // Start all_gather (non-blocking) using the single-buffer overload
+  auto work_schedule = context->allgather(input_tensor, output_tensor);
+  TORCH_CHECK(work_schedule != nullptr,
+              "All_gather operation failed to create work schedule");
+
+  work_schedule->start();  // Start but DON'T wait
+
+  // Store WorkSchedule in map
+  {
+    std::lock_guard<std::mutex> lock(work_map_mutex_);
+    TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
+                "all_gather_async called twice on the same "
+                "allocation without intervening wait_work");
+    pending_work_map_.emplace(ctx, PendingWork{std::move(work_schedule)});
+    DEBUGINFO("Stored PendingWork for all_gather at ctx=", ctx,
+              ", pending_work_map size=", pending_work_map_.size());
+  }
+
+  return output;  // Return immediately without waiting
+}
+
 // Wait for async operation to complete
 at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
   DEBUGINFO("spyre::wait_work called");
@@ -192,10 +277,10 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
   {
     std::lock_guard<std::mutex> lock(work_map_mutex_);
     auto it = pending_work_map_.find(ctx);
-    TORCH_CHECK(
-        it != pending_work_map_.end(),
-        "No pending async work found for tensor. "
-        "wait_work must be called on a tensor returned from broadcast_async.");
+    TORCH_CHECK(it != pending_work_map_.end(),
+                "No pending async work found for tensor. "
+                "wait_work must be called on a tensor returned from "
+                "broadcast_async or all_gather_async.");
 
     work_to_wait = std::move(it->second.work);
     pending_work_map_.erase(it);
@@ -217,12 +302,16 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
 TORCH_LIBRARY(spyre, m) {
   m.def(
       "broadcast_async(Tensor input, int src_rank, str group_name) -> Tensor");
-  // wait_work mutates the tensor in-place (fills in the broadcasted data)
+  m.def(
+      "all_gather_async(Tensor input, SymInt group_size=1, "
+      "str group_name=\"default\") -> Tensor");
+  // wait_work mutates the tensor in-place (fills in the received data)
   m.def("wait_work(Tensor(a!) tensor) -> Tensor(a)");
 }
 
 // Register the implementations with PyTorch's dispatcher
 TORCH_LIBRARY_IMPL(spyre, PrivateUse1, m) {
   m.impl("broadcast_async", &spyre::spyre_broadcast_async_impl);
+  m.impl("all_gather_async", &spyre::spyre_allgather_async_impl);
   m.impl("wait_work", &spyre::spyre_wait_work_impl);
 }

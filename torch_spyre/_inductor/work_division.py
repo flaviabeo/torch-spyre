@@ -20,6 +20,7 @@ from sympy import Expr, Integer, Symbol, divisors
 from .ir import (
     SpyreConstantFallback,
     SpyreEmptyFallback,
+    AllGatherAsyncFallback,
     BroadcastAsyncFallback,
     WaitWorkFallback,
 )
@@ -1428,7 +1429,14 @@ def _iter_computed_buffers(operations: list[Operation]):
                 # Work division not supported on allocation/constant kernels, nor
                 # on DeviceCopy.
                 pass
-            elif isinstance(op, (BroadcastAsyncFallback, WaitWorkFallback)):
+            elif isinstance(
+                op,
+                (
+                    BroadcastAsyncFallback,
+                    WaitWorkFallback,
+                    AllGatherAsyncFallback,
+                ),
+            ):
                 # Work division not supported on broadcast kernels
                 pass
             else:
