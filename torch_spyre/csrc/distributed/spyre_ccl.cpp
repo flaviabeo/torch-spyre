@@ -482,6 +482,12 @@ c10::intrusive_ptr<Work> SpyreCCLBackend::allreduce(
                            " Actual: " + std::to_string(opts.reduceOp);
     TORCH_CHECK(false, _err_msg);
   }
+  if (spyre::torchScalarToString[tensors[0].scalar_type()] != "float16") {
+    std::string _err_msg =
+        "[" + getBackendName() + "]: Allreduce only supports float16 tensors." +
+        " Actual: " + spyre::torchScalarToString[tensors[0].scalar_type()];
+    TORCH_CHECK(false, _err_msg);
+  }
 
   spyre_comms::Tensor tensor;
   prepare_tensor(tensors[0], &tensor);
@@ -615,6 +621,12 @@ c10::intrusive_ptr<Work> SpyreCCLBackend::reduce(
     std::string _err_msg = "[" + getBackendName() +
                            "]: Reduce only supports SUM operation." +
                            " Actual: " + std::to_string(opts.reduceOp);
+    TORCH_CHECK(false, _err_msg);
+  }
+  if (spyre::torchScalarToString[tensors[0].scalar_type()] != "float16") {
+    std::string _err_msg =
+        "[" + getBackendName() + "]: Reduce only supports float16 tensors." +
+        " Actual: " + spyre::torchScalarToString[tensors[0].scalar_type()];
     TORCH_CHECK(false, _err_msg);
   }
 
