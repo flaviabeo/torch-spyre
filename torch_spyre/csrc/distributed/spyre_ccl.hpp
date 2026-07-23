@@ -208,6 +208,7 @@ class SpyreCCLWork : public Work {
  private:
   c10::intrusive_ptr<c10::ivalue::Future> future_;
   std::shared_ptr<spyre_comms::WorkSchedule> work_schedule_;
+  bool completed_ = false;
 };
 
 }  // namespace c10d
