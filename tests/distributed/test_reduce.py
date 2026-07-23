@@ -74,7 +74,7 @@ class TestReduce(TestCase):
         if dist.is_initialized():
             dist.destroy_process_group()
 
-    def _test_reduce_helper(self, shape, dtype, dst):
+    def _test_reduce_helper(self, shape, dtype, dst, async_op=False):
         """
         Helper method to test reduce with specific parameters.
 
@@ -82,6 +82,8 @@ class TestReduce(TestCase):
             shape: Tensor shape
             dtype: Tensor data type
             dst: Destination rank for reduce
+            async_op: If True, launch the collective asynchronously and call
+                      work.wait() before inspecting the result
         """
         # Calculate total number of elements in the tensor
         num_elements = torch.tensor(shape).prod().item()
@@ -101,7 +103,15 @@ class TestReduce(TestCase):
         input_device = input_tensor.to(DEVICE)
 
         # Reduce with SUM operation to destination rank
-        dist.reduce(input_device, dst=dst, op=dist.ReduceOp.SUM)
+        work = dist.reduce(
+            input_device, dst=dst, op=dist.ReduceOp.SUM, async_op=async_op
+        )
+
+        if async_op:
+            self.assertIsNotNone(work, "async_op=True must return a Work handle")
+            work.wait()
+        else:
+            self.assertIsNone(work, "async_op=False must return None")
 
         if self.comm_rank == dst:
             result = input_device.to("cpu")
@@ -146,6 +156,25 @@ class TestReduce(TestCase):
         """Test reduce to non-zero destination rank with 2D tensor shapes using float16."""
         dst_rank = min(1, self.comm_size - 1)
         self._test_reduce_helper(shape=(4, 64), dtype=torch.float16, dst=dst_rank)
+
+    def test_reduce_float16_async(self):
+        """Test reduce to rank 0 with float16 tensors using async_op=True."""
+        self._test_reduce_helper(
+            shape=(128,), dtype=torch.float16, dst=0, async_op=True
+        )
+
+    def test_reduce_2d_tensor_float16_async(self):
+        """Test reduce with 2D float16 tensors using async_op=True."""
+        self._test_reduce_helper(
+            shape=(4, 64), dtype=torch.float16, dst=0, async_op=True
+        )
+
+    def test_reduce_rank_non_zero_float16_async(self):
+        """Test reduce to non-zero destination rank with float16 tensors using async_op=True."""
+        dst_rank = min(1, self.comm_size - 1)
+        self._test_reduce_helper(
+            shape=(128,), dtype=torch.float16, dst=dst_rank, async_op=True
+        )
 
 
 if __name__ == "__main__":

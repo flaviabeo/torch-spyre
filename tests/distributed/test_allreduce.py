@@ -74,13 +74,15 @@ class TestAllReduce(TestCase):
         if dist.is_initialized():
             dist.destroy_process_group()
 
-    def _test_allreduce_helper(self, shape, dtype):
+    def _test_allreduce_helper(self, shape, dtype, async_op=False):
         """
         Helper method to test allreduce with specific parameters.
 
         Args:
             shape: Tensor shape
             dtype: Tensor data type
+            async_op: If True, launch the collective asynchronously and call
+                      work.wait() before inspecting the result
         """
         # Calculate total number of elements in the tensor
         num_elements = torch.tensor(shape).prod().item()
@@ -100,7 +102,13 @@ class TestAllReduce(TestCase):
         input_device = input_tensor.to(DEVICE)
 
         # Allreduce with SUM operation — all ranks receive the result
-        dist.all_reduce(input_device, op=dist.ReduceOp.SUM)
+        work = dist.all_reduce(input_device, op=dist.ReduceOp.SUM, async_op=async_op)
+
+        if async_op:
+            self.assertIsNotNone(work, "async_op=True must return a Work handle")
+            work.wait()
+        else:
+            self.assertIsNone(work, "async_op=False must return None")
 
         result = input_device.to("cpu")
 
@@ -132,6 +140,14 @@ class TestAllReduce(TestCase):
     def test_allreduce_2d_tensor_float16(self):
         """Test allreduce with 2D tensor shapes using float16."""
         self._test_allreduce_helper(shape=(4, 64), dtype=torch.float16)
+
+    def test_allreduce_float16_async(self):
+        """Test allreduce with float16 tensors using async_op=True."""
+        self._test_allreduce_helper(shape=(128,), dtype=torch.float16, async_op=True)
+
+    def test_allreduce_2d_tensor_float16_async(self):
+        """Test allreduce with 2D tensor shapes using float16 and async_op=True."""
+        self._test_allreduce_helper(shape=(4, 64), dtype=torch.float16, async_op=True)
 
 
 if __name__ == "__main__":
