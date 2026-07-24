@@ -15,8 +15,10 @@
  */
 #include "spyre_ccl.hpp"
 
+#include <chrono>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <unordered_map>
 #include <utility>
@@ -684,19 +686,51 @@ SpyreCCLWork::SpyreCCLWork(OpType opType)
 bool SpyreCCLWork::isCompleted() {
   if (work_schedule_ && !completed_) {
     completed_ = work_schedule_->query();
+    // Resolve the future as soon as completion is first detected so that
+    // callers who poll isCompleted() rather than calling wait() still see
+    // a resolved future — matching the c10d::Work contract.
+    if (completed_ && !future_->completed()) {
+      future_->markCompleted(c10::IValue(std::vector<at::Tensor>{}));
+    }
   }
   return completed_;
 }
 
 bool SpyreCCLWork::isSuccess() const {
-  return true;
+  return exception_ == nullptr;
 }
 
 bool SpyreCCLWork::wait(std::chrono::milliseconds timeout) {
-  if (work_schedule_ && !completed_) {
-    work_schedule_->wait();
-    completed_ = true;
+  if (!work_schedule_ || completed_) {
+    // Already done; resolve the future if it hasn't been yet.
+    if (!future_->completed()) {
+      future_->markCompleted(c10::IValue(std::vector<at::Tensor>{}));
+    }
+    return true;
   }
+
+  if (timeout == kUnsetTimeout || timeout == kNoTimeout) {
+    // No deadline: block until the device signals completion.
+    work_schedule_->wait();
+  } else {
+    // Timed wait: poll query() until completion or deadline, then throw on
+    // timeout to match the c10d::Work base-class contract.
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!work_schedule_->query()) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        TORCH_CHECK(false, "[SpyreCCL]: Operation timed out!");
+      }
+      std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+  }
+
+  completed_ = true;
+
+  // Resolve the future so any getFuture() chain-continuations are unblocked.
+  if (!future_->completed()) {
+    future_->markCompleted(c10::IValue(std::vector<at::Tensor>{}));
+  }
+
   return true;
 }
 

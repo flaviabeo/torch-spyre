@@ -176,6 +176,13 @@ class TestReduce(TestCase):
             shape=(128,), dtype=torch.float16, dst=dst_rank, async_op=True
         )
 
+    def test_reduce_2d_tensor_rank_non_zero_float16_async(self):
+        """Test reduce with 2D float16 tensors to a non-zero destination rank using async_op=True."""
+        dst_rank = min(1, self.comm_size - 1)
+        self._test_reduce_helper(
+            shape=(4, 64), dtype=torch.float16, dst=dst_rank, async_op=True
+        )
+
 
 if __name__ == "__main__":
     run_tests()

@@ -49,9 +49,15 @@ def run_test(comm_rank, comm_size, async_op=False):
 
     # Prepare output tensors (only needed at root, but we prepare for all for simplicity)
     output_list = None
+    expected = []
     if comm_rank == dst_rank:
         # Root rank prepares a list to receive tensors from all ranks
         output_list = [torch.zeros_like(input_device) for _ in range(comm_size)]
+        # build expected tensors on CPU while the collective runs on hardware
+        for rank_idx in range(comm_size):
+            rank_start = rank_idx * num_elements
+            rank_end = rank_start + num_elements
+            expected.append(torch.arange(rank_start, rank_end, dtype=torch.float16))
 
     if async_op:
         # Launch gather asynchronously — returns a Work handle immediately
@@ -60,12 +66,7 @@ def run_test(comm_rank, comm_size, async_op=False):
             input_device, gather_list=output_list, dst=dst_rank, async_op=True
         )
 
-        # Overlap: build expected tensors on CPU while the collective runs on hardware
-        expected = []
-        for rank_idx in range(comm_size):
-            rank_start = rank_idx * num_elements
-            rank_end = rank_start + num_elements
-            expected.append(torch.arange(rank_start, rank_end, dtype=torch.float16))
+        # Note: Opportunity for overlapping of host activities with asynchronous communication.
 
         # Block until the async collective has completed
         work.wait()
@@ -73,12 +74,6 @@ def run_test(comm_rank, comm_size, async_op=False):
         # Gather with the collective library
         print(f"[{comm_rank} of {comm_size}] Gather Tensor: Spyre")
         dist.gather(input_device, gather_list=output_list, dst=dst_rank)
-
-        expected = []
-        for rank_idx in range(comm_size):
-            rank_start = rank_idx * num_elements
-            rank_end = rank_start + num_elements
-            expected.append(torch.arange(rank_start, rank_end, dtype=torch.float16))
 
     # Check the result at root
     if comm_rank == dst_rank:

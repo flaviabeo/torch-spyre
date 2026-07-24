@@ -49,17 +49,19 @@ def run_test(comm_rank, comm_size, async_op=False):
     # Prepare output tensors - all ranks need this for allgather
     output_list = [torch.zeros_like(input_device) for _ in range(comm_size)]
 
+    # Build expected values on CPU while the collective runs on hardware
+    expected = []
+    for rank_idx in range(comm_size):
+        rank_start = rank_idx * num_elements
+        rank_end = rank_start + num_elements
+        expected.append(torch.arange(rank_start, rank_end, dtype=torch.float16))
+
     if async_op:
         # Launch allgather asynchronously — returns a Work handle immediately
         print(f"[{comm_rank} of {comm_size}] Allgather Tensor (async): Spyre")
         work = dist.all_gather(output_list, input_device, async_op=True)
 
-        # Overlap: build expected values on CPU while the collective runs on hardware
-        expected = []
-        for rank_idx in range(comm_size):
-            rank_start = rank_idx * num_elements
-            rank_end = rank_start + num_elements
-            expected.append(torch.arange(rank_start, rank_end, dtype=torch.float16))
+        # Note: Opportunity for overlapping of host activities with asynchronous communication.
 
         # Block until the async collective has completed
         work.wait()
@@ -67,12 +69,6 @@ def run_test(comm_rank, comm_size, async_op=False):
         # Allgather with the collective library
         print(f"[{comm_rank} of {comm_size}] Allgather Tensor: Spyre")
         dist.all_gather(output_list, input_device)
-
-        expected = []
-        for rank_idx in range(comm_size):
-            rank_start = rank_idx * num_elements
-            rank_end = rank_start + num_elements
-            expected.append(torch.arange(rank_start, rank_end, dtype=torch.float16))
 
     # Check the result at all ranks
     print(f"[{comm_rank} of {comm_size}] Gathered tensors from all ranks:")

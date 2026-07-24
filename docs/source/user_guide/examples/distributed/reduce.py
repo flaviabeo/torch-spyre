@@ -48,23 +48,24 @@ def run_test(comm_rank, comm_size, async_op=False):
     # Send input tensor to Spyre device
     input_device = input_tensor.to(DEVICE)
 
-    # Expected result: sum of all ranks' contributions at each position
-    # Position i gets: (0*num_elements + i) + (1*num_elements + i) + ... + ((comm_size-1)*num_elements + i)
-    # = i*comm_size + num_elements*(0 + 1 + ... + (comm_size-1))
-    # = i*comm_size + num_elements*comm_size*(comm_size-1)/2
-    expected_tensor = torch.zeros(num_elements, dtype=torch.float16)
-    for i in range(num_elements):
-        expected_tensor[i] = (
-            i * comm_size + num_elements * comm_size * (comm_size - 1) / 2
-        )
+    expected_tensor = None
+    if comm_rank == 0:
+        # Expected result: sum of all ranks' contributions at each position
+        # Position i gets: (0*num_elements + i) + (1*num_elements + i) + ... + ((comm_size-1)*num_elements + i)
+        # = i*comm_size + num_elements*(0 + 1 + ... + (comm_size-1))
+        # = i*comm_size + num_elements*comm_size*(comm_size-1)/2
+        expected_tensor = torch.zeros(num_elements, dtype=torch.float16)
+        for i in range(num_elements):
+            expected_tensor[i] = (
+                i * comm_size + num_elements * comm_size * (comm_size - 1) / 2
+            )
 
     if async_op:
         # Launch reduce asynchronously — returns a Work handle immediately
         print(f"[{comm_rank} of {comm_size}] Reduce Tensor (SUM, async): Spyre")
         work = dist.reduce(input_device, dst=0, op=dist.ReduceOp.SUM, async_op=True)
 
-        # Overlap: expected_tensor was already computed above on CPU while the
-        # collective runs on hardware
+        # Note: Opportunity for overlapping of host activities with asynchronous communication.
 
         # Block until the async collective has completed
         work.wait()

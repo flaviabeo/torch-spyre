@@ -63,8 +63,7 @@ def run_test(comm_rank, comm_size, async_op=False):
         print(f"[{comm_rank} of {comm_size}] Allreduce Tensor (SUM, async): Spyre")
         work = dist.all_reduce(input_device, op=dist.ReduceOp.SUM, async_op=True)
 
-        # Overlap: expected_tensor was already computed above on CPU while the
-        # collective runs on hardware
+        # Note: Opportunity for overlapping of host activities with asynchronous communication.
 
         # Block until the async collective has completed
         work.wait()
