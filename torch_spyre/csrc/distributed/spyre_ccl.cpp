@@ -635,6 +635,10 @@ c10::intrusive_ptr<Work> SpyreCCLBackend::scatter(
 
 c10::intrusive_ptr<Work> SpyreCCLBackend::send(std::vector<at::Tensor>& tensors,
                                                int dstRank, int tag) {
+  // NOTE: The c10d::Backend::send() signature carries no opts struct and
+  // therefore exposes no asyncOp flag.  We follow the same non-blocking
+  // submission pattern used by all collectives and leave completion control
+  // to the caller via Work::wait().
   check_vector_tensor(tensors, 1, 1);
 
   spyre_comms::Tensor tensor;
@@ -644,12 +648,15 @@ c10::intrusive_ptr<Work> SpyreCCLBackend::send(std::vector<at::Tensor>& tensors,
       c10::make_intrusive<SpyreCCLWork>(OpType::SEND);
   work->work_schedule_ = group_context_->send(tensor, dstRank, tag);
   work->work_schedule_->start();
-  work->work_schedule_->wait();
   return work;
 }
 
 c10::intrusive_ptr<Work> SpyreCCLBackend::recv(std::vector<at::Tensor>& tensors,
                                                int srcRank, int tag) {
+  // NOTE: The c10d::Backend::recv() signature carries no opts struct and
+  // therefore exposes no asyncOp flag.  We follow the same non-blocking
+  // submission pattern used by all collectives and leave completion control
+  // to the caller via Work::wait().
   check_vector_tensor(tensors, 1, 1);
 
   spyre_comms::Tensor tensor;
@@ -659,7 +666,6 @@ c10::intrusive_ptr<Work> SpyreCCLBackend::recv(std::vector<at::Tensor>& tensors,
       c10::make_intrusive<SpyreCCLWork>(OpType::RECV);
   work->work_schedule_ = group_context_->recv(tensor, srcRank, tag);
   work->work_schedule_->start();
-  work->work_schedule_->wait();
   return work;
 }
 
