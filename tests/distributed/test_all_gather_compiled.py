@@ -105,7 +105,6 @@ class TestAllGatherCompiled(TestCase):
         x = torch.full(
             (128,), float(self.comm_rank), dtype=torch.float32, device=DEVICE
         )
-        print(f"x {x}")
         module = AllGatherCompiledModule(group_size=self.comm_size)
         compiled_module = torch.compile(module)
         result = compiled_module(x)
@@ -115,9 +114,7 @@ class TestAllGatherCompiled(TestCase):
         result_cpu = result.to("cpu")
         for rank in range(self.comm_size):
             chunk = result_cpu[rank * 128 : (rank + 1) * 128]
-            print(f"chunk {chunk}")
             expected = torch.full((128,), float(rank), dtype=torch.float32)
-            print(f"expected {expected}")
             self.assertTrue(
                 torch.allclose(chunk, expected),
                 f"Rank {self.comm_rank}: all_gather chunk for rank {rank} incorrect",
@@ -130,7 +127,6 @@ class TestAllGatherCompiled(TestCase):
         compiled_module = torch.compile(module)
         result = compiled_module(x)
 
-        print(f"result {result}")
         self.assertEqual(result.dtype, torch.float16)
         self.assertEqual(result.shape[0], 256 * self.comm_size)
 
