@@ -38,6 +38,8 @@ namespace spyre {
 // Structure to hold pending async work
 struct PendingWork {
   std::shared_ptr<spyre_comms::WorkSchedule> work;
+  std::vector<at::Tensor> rank_outputs;
+  int64_t chunk_size = 0;  // elements per rank along dim 0
 };
 
 // Global map to track pending async operations
@@ -243,35 +245,30 @@ at::Tensor spyre_allgather_async_impl(const at::Tensor& input,
   TORCH_CHECK(work_schedule != nullptr,
               "All_gather operation failed to create work schedule");
 
-  work_schedule->start();
-  work_schedule->wait();
+  work_schedule->start();  // Start but DON'T wait
 
-  // Create single contiguous output and copy per-rank results into it
   auto output_sizes = input.sizes().vec();
   output_sizes[0] *= group_size;
   at::Tensor output = at::empty(output_sizes, input.options());
-
-  for (int64_t i = 0; i < group_size; i++) {
-    output.narrow(0, i * input.size(0), input.size(0)).copy_(rank_outputs[i]);
-  }
 
   // Get SharedOwnerCtx for map key (stable per-allocation identity)
   auto* ctx = static_cast<spyre::SharedOwnerCtx*>(
       output.storage().data_ptr().get_context());
   TORCH_CHECK(ctx != nullptr, "SharedOwnerCtx is null for output tensor");
 
-  // Store a completed entry so wait_work can find it (nullptr = already waited)
   {
     std::lock_guard<std::mutex> lock(work_map_mutex_);
     TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
                 "all_gather_async called twice on the same "
                 "allocation without intervening wait_work");
-    pending_work_map_.emplace(ctx, PendingWork{nullptr});
+    pending_work_map_.emplace(
+        ctx, PendingWork{std::move(work_schedule), std::move(rank_outputs),
+                         input.size(0)});
     DEBUGINFO("Stored PendingWork for all_gather at ctx=", ctx,
               ", pending_work_map size=", pending_work_map_.size());
   }
 
-  return output;
+  return output;  // Return immediately without waiting
 }
 
 // Wait for async operation to complete
@@ -284,8 +281,7 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
   TORCH_CHECK(ctx != nullptr,
               "SharedOwnerCtx is null — is this tensor from broadcast_async?");
 
-  // Extract WorkSchedule under lock, erase map entry, release lock, then wait
-  std::shared_ptr<spyre_comms::WorkSchedule> work_to_wait;
+  PendingWork pending;
   {
     std::lock_guard<std::mutex> lock(work_map_mutex_);
     auto it = pending_work_map_.find(ctx);
@@ -294,21 +290,30 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
                 "wait_work must be called on a tensor returned from "
                 "broadcast_async or all_gather_async.");
 
-    work_to_wait = std::move(it->second.work);
+    pending = std::move(it->second);
     pending_work_map_.erase(it);
     DEBUGINFO("Extracted and erased PendingWork, map size=",
               pending_work_map_.size());
   }
 
   // Lock released — concurrent wait_work and broadcast_async can now proceed
-  if (work_to_wait) {
-    work_to_wait->wait();
+  if (pending.work) {
+    pending.work->wait();
     DEBUGINFO("WorkSchedule wait completed");
-  } else {
-    DEBUGINFO("WorkSchedule already completed (synchronous allgather)");
   }
 
-  // Return the input tensor (already has the broadcasted data)
+  // For allgather: copy per-rank results into the contiguous output buffer
+  if (!pending.rank_outputs.empty()) {
+    for (size_t i = 0; i < pending.rank_outputs.size(); i++) {
+      tensor
+          .narrow(0, static_cast<int64_t>(i) * pending.chunk_size,
+                  pending.chunk_size)
+          .copy_(pending.rank_outputs[i]);
+    }
+    DEBUGINFO("Assembled allgather output from ", pending.rank_outputs.size(),
+              " rank buffers");
+  }
+
   return tensor;
 }
 
