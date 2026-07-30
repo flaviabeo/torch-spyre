@@ -117,6 +117,7 @@ class TestGather(TestCase):
         if async_op:
             self.assertIsNotNone(work, "async_op=True must return a Work handle")
             work.wait()
+            self.assertTrue(work.is_completed())
         else:
             self.assertIsNone(work, "async_op=False must return None")
 

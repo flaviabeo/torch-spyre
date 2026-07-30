@@ -136,6 +136,7 @@ class TestBarrier(TestCase):
         work = dist.barrier(async_op=True)
         self.assertIsNotNone(work, "async_op=True must return a Work handle")
         work.wait()
+        self.assertTrue(work.is_completed())
         self.assertTrue(True, "Async barrier completed successfully")
 
     def test_barrier_synchronization_timing_async(self):
@@ -154,6 +155,7 @@ class TestBarrier(TestCase):
 
         # Block until all ranks have reached the barrier
         work.wait()
+        self.assertTrue(work.is_completed())
 
         elapsed_time = time.time() - start_time
 
