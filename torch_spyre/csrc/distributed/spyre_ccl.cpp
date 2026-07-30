@@ -691,7 +691,14 @@ SpyreCCLWork::SpyreCCLWork(OpType opType)
 
 bool SpyreCCLWork::isCompleted() {
   if (work_schedule_ && !completed_) {
-    completed_ = work_schedule_->query();
+    try {
+      completed_ = work_schedule_->query();
+    }
+    catch (...) {
+      exception_ = std::current_exception();
+      completed_ = true;
+      std::rethrow_exception(exception_);
+    }
     // Resolve the future as soon as completion is first detected so that
     // callers who poll isCompleted() rather than calling wait() still see
     // a resolved future — matching the c10d::Work contract.
@@ -717,16 +724,28 @@ bool SpyreCCLWork::wait(std::chrono::milliseconds timeout) {
 
   if (timeout == kUnsetTimeout || timeout == kNoTimeout) {
     // No deadline: block until the device signals completion.
-    work_schedule_->wait();
+    try {
+      work_schedule_->wait();
+    }
+    catch (...) {
+      exception_ = std::current_exception();
+      std::rethrow_exception(exception_);
+    }
   } else {
     // Timed wait: poll query() until completion or deadline, then throw on
     // timeout to match the c10d::Work base-class contract.
     auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (!work_schedule_->query()) {
-      if (std::chrono::steady_clock::now() >= deadline) {
-        TORCH_CHECK(false, "[SpyreCCL]: Operation timed out!");
+    try {
+      while (!work_schedule_->query()) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+          TORCH_CHECK(false, "[SpyreCCL]: Operation timed out!");
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
       }
-      std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+    catch (...) {
+      exception_ = std::current_exception();
+      std::rethrow_exception(exception_);
     }
   }
 
