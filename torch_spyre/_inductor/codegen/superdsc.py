@@ -28,6 +28,8 @@ from torch_spyre._inductor.constants import (
     MATMUL_DIM_LABELS,
     MATMUL_LAYOUT_LABELS,
     MATMUL_REDUCTION_OPS,
+    POOL_DIM_LABELS,
+    POOL_OPS,
     RESTICKIFY_OP,
     TOPK_OPS,
 )
@@ -120,6 +122,16 @@ class SDSCSpec:
     )
     indirect_access_indices: list[int] = dataclasses.field(default_factory=list)
     debug_handle: DebugHandle | None = None
+    # Generic pool/window fields.  Neutral defaults mean generate_sdsc treats a
+    # non-pool op exactly as before; parse_op_spec fills these for pool ops via
+    # _avgpool_sdsc_fields, so compute_ops.py stays free of op-specific logic.
+    padding_sizes: dict = dataclasses.field(default_factory=dict)
+    pds_reuse: bool = False
+    stick_replication: bool = False
+    window_dims: frozenset = dataclasses.field(default_factory=frozenset)
+    input_coord_padding: dict = dataclasses.field(default_factory=dict)
+    input_coord_sizes: dict = dataclasses.field(default_factory=dict)
+    emit_memorg_padding: bool = False
 
     def __str__(self) -> str:
         iter_space = ", ".join(f"{k}={v}" for k, v in self.iteration_space.items())
@@ -330,6 +342,126 @@ def _is_topk(op: str) -> bool:
     return op in TOPK_OPS
 
 
+def _is_pool(op: str) -> bool:
+    return op in POOL_OPS
+
+
+# Canonical avgpool iteration-space order (NHWC) -> SDSC labels.  Codegen owns
+# these label strings; survival of each role is read from the node's live output
+# ranges (see _align_pool_dim_labels), so no size info leaks above codegen.
+# Order matches POOL_DIM_LABELS and the emitted (NHWC) iteration space.
+_POOL_ROLE_LABELS = list(
+    zip(["batch", "out_h", "out_w", "channel", "win_h", "win_w"], POOL_DIM_LABELS)
+)
+
+
+def _is_static_one(sz) -> bool:
+    try:
+        return int(sz) == 1
+    except (TypeError, ValueError):
+        return False  # symbolic/dynamic dim: never dropped
+
+
+def _align_pool_dim_labels(node_output_ranges, ndim: int) -> list[str]:
+    """Return the pool dim labels aligned to the (possibly squeezed) iteration space.
+
+    ``node_output_ranges`` is the reduction node's full logical output ranges in
+    **NCHW** order ``[N, C, H_out, W_out]`` (live IR, incl. unit dims) — see
+    ``OpSpec.node_output_ranges``.  Codegen owns the SDSC label for each role
+    (``_POOL_ROLE_LABELS``, in **NHWC** order).  The compilation pipeline drops
+    statically size-1 output dims (e.g. batch N=1) before parse_op_spec runs, so
+    a role whose live range is 1 has no surviving iteration-space dim and its
+    label is filtered out.  Survival is keyed by role name and emitted in NHWC
+    order; the window dims (win_h/win_w) always survive because the lowering
+    delegates to the in-tree path when kH==1 or kW==1, so a SpyreReduction always
+    has kH>1 and kW>1.  This keeps labels aligned to the real iteration space
+    using live node ranges rather than a lowering-time size snapshot.
+    """
+    if node_output_ranges is None or len(node_output_ranges) != 4:
+        raise ValueError(
+            "pool node_output_ranges must be NCHW [N, C, H_out, W_out]; got "
+            f"{node_output_ranges!r}"
+        )
+    # NCHW positions: 0=batch, 1=channel, 2=out_h, 3=out_w.
+    survives = {
+        "batch": not _is_static_one(node_output_ranges[0]),
+        "channel": not _is_static_one(node_output_ranges[1]),
+        "out_h": not _is_static_one(node_output_ranges[2]),
+        "out_w": not _is_static_one(node_output_ranges[3]),
+        "win_h": True,  # kH>1 guaranteed by the lowering delegation guard
+        "win_w": True,  # kW>1 guaranteed by the lowering delegation guard
+    }
+    labels = [label for role, label in _POOL_ROLE_LABELS if survives[role]]
+    if len(labels) != ndim:
+        raise ValueError(
+            f"pool dim label count {len(labels)} ({labels}) does not match "
+            f"iteration-space rank {ndim}; node_output_ranges {node_output_ranges!r} "
+            "are out of sync with the emitted iteration space"
+        )
+    return labels
+
+
+def _avgpool_sdsc_fields(iteration_space: dict, pool_params: dict) -> dict:
+    """Compute the pool-specific SDSC field values for an avgpool op.
+
+    Returns plain data that is threaded onto ``SDSCSpec`` and consumed
+    generically by ``generate_sdsc`` in compute_ops.py, which keeps no
+    pool-specific knowledge (see the generic ``padding``/``num_inputs``
+    fields for the established pattern).  ``iteration_space`` is the renamed
+    SDSC iteration space, so the spatial dims are keyed by ``Symbol("i")`` and
+    ``Symbol("j")``.
+    """
+    kH = int(pool_params["kernel_h"])
+    kW = int(pool_params["kernel_w"])
+    sH = int(pool_params.get("stride_h", 1))
+    sW = int(pool_params.get("stride_w", 1))
+    pH = int(pool_params.get("pad_h", 0))
+    pW = int(pool_params.get("pad_w", 0))
+    fullspan = "padded_fullspan_wunneeded"
+
+    # One entry per spatial axis whose pooling window actually survives in the
+    # iteration space.  kernel_size==1 makes that axis' reduction dim size-1,
+    # which the pipeline squeezes out (so its label was already dropped by
+    # _align_pool_dim_labels).  Such an axis is a plain pass-through: emitting a
+    # paddingSizes_/windowDim_ entry for it would reference a dim the SDSC no
+    # longer has, and dxp_standalone aborts with "Missing window size for padded
+    # size calculation".  So skip any axis whose window dim is absent.
+    axes = [
+        ("i", "ki", kH, sH, pH),
+        ("j", "kj", kW, sW, pW),
+    ]
+    padding_sizes: dict = {}
+    window_dims: set = set()
+    input_coord_padding: dict = {}
+    input_coord_sizes: dict = {}
+    for spatial, window, k, s, p in axes:
+        if Symbol(window) not in iteration_space:
+            continue
+        out = int(iteration_space.get(Symbol(spatial), 1))
+        in_size = (out - 1) * s + k
+        padding_sizes[spatial] = {
+            "padFront_": p,
+            "padBack_": p,
+            "totalSize_": in_size,
+            "stride_": s,
+            "dilation_": 1,
+            "windowDim_": window,
+        }
+        window_dims.add(window)
+        input_coord_padding[spatial] = fullspan
+        input_coord_sizes[spatial] = in_size
+
+    return {
+        "padding_sizes": padding_sizes,
+        "pds_reuse": True,
+        "stick_replication": True,
+        "window_dims": frozenset(window_dims),
+        "input_coord_padding": input_coord_padding,
+        "input_coord_sizes": input_coord_sizes,
+        "emit_memorg_padding": True,
+    }
+
+
 def _get_op_dim_labels(ndim: int, is_matmul: bool) -> list[str]:
     if is_matmul:
         return MATMUL_DIM_LABELS[len(MATMUL_DIM_LABELS) - ndim :]
@@ -360,8 +492,15 @@ def _collect_index_tensor_layouts(
     symbol_mapping: dict,
     index_tensor_indices: set[int],
     logger: object,
+    gather_mb_injected: bool = False,
+    mb_sym: Symbol | None = None,
 ) -> tuple[dict, dict]:
     """First pass: compute (dim_order, stick_dim) for each index tensor.
+
+    For P=1 gathers the index tensor has all-constant coordinates (no loop
+    variables), so its natural dim_order is empty.  When ``gather_mb_injected``
+    is True, override the layout to ``([mb_sym], mb_sym)`` so the KERNEL_IDX
+    has a valid non-empty layout.
 
     Returns:
         index_tensor_layouts: dict mapping tensor_idx -> (dim_order, stick_dim)
@@ -373,6 +512,10 @@ def _collect_index_tensor_layouts(
     for i in index_tensor_indices:
         arg = op_spec.args[i]
         dim_order, stick_dim = _get_device_dim_order(arg, symbol_mapping)
+        if gather_mb_injected and not dim_order:
+            # P=1: index tensor has all-constant coords; use the synthetic dim.
+            dim_order = [mb_sym]
+            stick_dim = mb_sym
         index_tensor_layouts[i] = (dim_order, stick_dim)
         active_dims = {d for d in dim_order if d is not stick_dim}
         index_active_dims[i] = active_dims
@@ -391,6 +534,7 @@ def _create_sdsc_tensors(
     op_dim_order: list[Symbol],
     op_stick_dim: Symbol | None,
     mb_sym: Symbol | None = None,
+    gather_mb_injected: bool = False,
 ) -> tuple[list[SDSCArgs], dict, Symbol | None]:
     dims = list(iteration_space.keys())
     layouts: dict = {}
@@ -404,12 +548,19 @@ def _create_sdsc_tensors(
     }
     has_indirect_access = bool(index_tensor_indices)
 
-    # For indirect access: pre-compute index tensor layouts (first pass)
+    # For indirect access: pre-compute index tensor layouts (first pass).
+    # Pass gather_mb_injected so index tensors with all-constant coordinates get
+    # their layout overridden to ([mb_sym], mb_sym) instead of ([], None).
     index_tensor_layouts: dict[int, tuple[list, Any]] = {}
     index_active_dims: dict[int, set] = {}
     if has_indirect_access:
         index_tensor_layouts, index_active_dims = _collect_index_tensor_layouts(
-            op_spec, symbol_mapping, index_tensor_indices, logger
+            op_spec,
+            symbol_mapping,
+            index_tensor_indices,
+            logger,
+            gather_mb_injected=gather_mb_injected,
+            mb_sym=mb_sym,
         )
 
     missing_dim = None
@@ -555,12 +706,21 @@ def _create_sdsc_tensors(
                 backGap[dim] = dev_dim_size - it_dim_size
                 strides[dim] = strides[dim] // dev_dim_size * it_dim_size
 
-        if mb_sym is not None:
+        # Prepend mb_sym to all tensors except the P=1 index tensor, which
+        # already has mb_sym set by _collect_index_tensor_layouts.
+        is_gather_index = (
+            gather_mb_injected and has_indirect_access and i in index_tensor_indices
+        )
+        if mb_sym is not None and not is_gather_index:
             dim_order = [mb_sym] + dim_order
             scales[mb_sym] = 1
             strides[mb_sym] = _calculate_device_stride(0, arg.device_size)
             offsets[mb_sym] = 0
-            max_dim_sizes[mb_sym] = -1
+            # P=1 gather value tensor fetches exactly 1 row per iteration.
+            if gather_mb_injected and is_indirect_value_tensor(arg):
+                max_dim_sizes[mb_sym] = 1
+            else:
+                max_dim_sizes[mb_sym] = -1
 
         effective_stick = op_stick_dim if stick_dim is None else stick_dim
         layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
@@ -634,6 +794,8 @@ def _create_sdsc_tensors(
 
 
 def _get_op_func(op: str, is_reduction: bool, output_scales: dict) -> str:
+    if _is_pool(op):
+        return op
     if (
         is_reduction
         and not _is_matmul(op)
@@ -768,6 +930,7 @@ def _extend_matmul_k_to_padded(
 
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     is_matmul = _is_matmul(op_spec.op)
+    is_pool = _is_pool(op_spec.op)
     ndim = len(op_spec.iteration_space)
     # Detect indirect access from device_coordinates: index tensors are those
     # whose name is referenced by an IndirectAccess in another tensor's coordinates,
@@ -777,7 +940,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     }
     has_indirect_access = bool(index_tensor_indices)
 
-    dim_labels = _get_op_dim_labels(ndim, is_matmul)
+    if is_pool:
+        dim_labels = _align_pool_dim_labels(op_spec.node_output_ranges, ndim)
+    else:
+        dim_labels = _get_op_dim_labels(ndim, is_matmul)
     symbol_mapping = {
         sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
     }
@@ -845,9 +1011,59 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         work_slices = {mb_sym: 1, **work_slices}
         op_dim_order = [mb_sym] + op_dim_order
 
+    # P=1 gather: when the index has only 1 element, Inductor eliminates the
+    # mb loop, leaving the index tensor with all-constant coordinates and no
+    # loop variable.  Inject a synthetic dim=1 so the KERNEL_IDX gets a valid
+    # non-empty layout, and the backend executes exactly one gather iteration.
+    gather_mb_injected: bool = False
+    if has_indirect_access and mb_sym is None:
+        for idx in index_tensor_indices:
+            idx_arg = op_spec.args[idx]
+            idx_dim_order, _ = _get_device_dim_order(idx_arg, symbol_mapping)
+            if not idx_dim_order:
+                # All-constant coords → P=1. Use 1, not stick_size: stick_size
+                # iterations would overflow a 1-row output tensor.
+                stick_size = idx_arg.device_dtype.elems_per_stick()
+                # Pick the first label not already in op_dim_order to avoid
+                # collisions when a higher-rank gather has consumed "mb".
+                _existing_names = {s.name for s in op_dim_order}
+                _p1_label = next(
+                    lbl for lbl in INPUT_DIM_LABELS if lbl not in _existing_names
+                )
+                mb_sym = Symbol(_p1_label)
+                sdsc_iteration_space = {mb_sym: 1, **sdsc_iteration_space}
+                dim_splits = {mb_sym: 1, **dim_splits}
+                work_slices = {mb_sym: 1, **work_slices}
+                op_dim_order = [mb_sym] + op_dim_order
+                gather_mb_injected = True
+                logger.debug(
+                    "P=1 gather detected (index tensor %d, stick_size=%d): "
+                    "injecting virtual %s=1 into SDSC iteration space",
+                    idx,
+                    stick_size,
+                    _p1_label,
+                )
+                break
+
     if op_stick_dim is None:
-        stick_sym = Symbol(INPUT_DIM_LABELS[ndim])
-        sdsc_iteration_space[stick_sym] = op_spec.args[0].device_dtype.elems_per_stick()
+        if is_pool:
+            # Pool op where C fits in one stick (e.g. C=1): the "out" (channel)
+            # dimension was dropped from the iteration space because its size is 1,
+            # but the SDSC still needs it.  Take the channel count from the node's
+            # live NCHW output ranges (position 1) rather than the physical device
+            # layout, which rounds channel up to a full stick and so cannot recover
+            # C when C < elems_per_stick.  (Using INPUT_DIM_LABELS[ndim] would
+            # collide with the pool dim labels "i", "j", "ki", "kj".)
+            stick_sym = Symbol("out")
+            # _align_pool_dim_labels already rejected a None here for pools;
+            # restate the invariant so the index is well-typed.
+            assert op_spec.node_output_ranges is not None
+            sdsc_iteration_space[stick_sym] = int(op_spec.node_output_ranges[1])
+        else:
+            stick_sym = Symbol(INPUT_DIM_LABELS[ndim])
+            sdsc_iteration_space[stick_sym] = op_spec.args[
+                0
+            ].device_dtype.elems_per_stick()
         work_slices[stick_sym] = 1
         dim_splits[stick_sym] = 1
 
@@ -861,6 +1077,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         op_dim_order,
         op_stick_dim,
         mb_sym,
+        gather_mb_injected=gather_mb_injected,
     )
     if missing_dim is not None:
         # A dimension was added to the iteration space, update splits and work slices
@@ -927,7 +1144,15 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             work_slices[dim] = 1
         num_cores = math.prod(dim_splits.values())
 
-    constants = dict(op_spec.op_info.get("constants", {})) if op_spec.op_info else {}
+    pool_params_out: dict = {}
+    if is_pool and op_spec.op_info:
+        pool_params_out = dict(op_spec.op_info.get("constants", {}))
+        scaling_factor = pool_params_out.get("scaling_factor", 1.0)
+        constants = {"nmap": scaling_factor}
+    else:
+        constants = (
+            dict(op_spec.op_info.get("constants", {})) if op_spec.op_info else {}
+        )
     coordinate_masking = _get_coordinate_mask(
         sdsc_iteration_space, args[-1], padding, op_spec.op
     )
@@ -938,6 +1163,23 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
 
     if _is_topk(op_spec.op):
         num_inputs = 1  # topk has exactly 1 input tensor and 1 output tensor
+
+    if is_pool:
+        num_inputs = 1  # avgpool has exactly 1 input tensor and 1 output tensor
+        # The pool hardware accumulates the full kernel window on each core.
+        # Splitting ki/kj across cores produces partial sums, giving wrong results.
+        for _k_sym in (Symbol("ki"), Symbol("kj")):
+            if _k_sym in dim_splits:
+                dim_splits[_k_sym] = 1
+                work_slices[_k_sym] = 1
+        num_cores = math.prod(dim_splits.values())
+
+    # Pool-specific SDSC field values.  Computed here (where the op is already
+    # identified) as plain data threaded onto SDSCSpec; generate_sdsc consumes
+    # them generically.  Empty for non-pool ops -> SDSCSpec defaults apply.
+    pool_sdsc_fields = (
+        _avgpool_sdsc_fields(sdsc_iteration_space, pool_params_out) if is_pool else {}
+    )
 
     # Project dim_splits into final SDSC iteration-space order; normalization
     # can add unit axes to either mapping independently.
@@ -983,6 +1225,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             symbolic_dims=symbolic_dims,
             indirect_access_indices=indirect_access_indices,
             debug_handle=op_spec.debug_handle,
+            **pool_sdsc_fields,
         ),
         symbol_mapping,
     )
