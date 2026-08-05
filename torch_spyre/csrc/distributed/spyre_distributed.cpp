@@ -186,7 +186,9 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
   return output;  // Return immediately without waiting
 }
 
-// All_gather implementation using the vector overload (proven working path)
+// Async all_gather: allocates one output buffer per rank, submits
+// context->allgather without waiting, and defers assembly into the
+// contiguous output tensor to wait_work.
 at::Tensor spyre_allgather_async_impl(const at::Tensor& input,
                                       int64_t group_size,
                                       const std::string& group_name) {
