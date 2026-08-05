@@ -26,12 +26,10 @@ if torch._C._dispatch_has_kernel("spyre::broadcast_async"):
         """
         return torch.empty_strided(x.shape, x.stride(), dtype=x.dtype, device=x.device)
 
-
     @torch.library.register_fake("spyre::wait_work")
     def _(x: torch.Tensor) -> torch.Tensor:
         """Fake implementation — pass through the tensor."""
         return x
-
 
     @torch.library.register_fake("spyre::all_gather_async")
     def _(
