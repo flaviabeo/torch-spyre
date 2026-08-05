@@ -35,8 +35,13 @@
 
 namespace spyre {
 
-// Structure to hold pending async work
+enum class CollectiveKind { Broadcast, AllGather };
+
+// Structure to hold pending async work.
+// Retains the keyed tensor's Storage to prevent the SharedOwnerCtx* (used as
+// the map key) from being freed while communication is in flight.
 struct PendingWork {
+  CollectiveKind kind;
   std::shared_ptr<spyre_comms::WorkSchedule> work;
   c10::Storage storage;
   std::vector<at::Tensor> rank_outputs;
@@ -178,7 +183,8 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
                 "broadcast_async called twice on the same allocation without "
                 "intervening wait_work");
     pending_work_map_.emplace(
-        ctx, PendingWork{std::move(work_schedule), output.storage()});
+        ctx, PendingWork{CollectiveKind::Broadcast, std::move(work_schedule),
+                         output.storage()});
     DEBUGINFO("Stored PendingWork at ctx=", ctx,
               ", pending_work_map size=", pending_work_map_.size());
   }
@@ -282,8 +288,9 @@ at::Tensor spyre_allgather_async_impl(const at::Tensor& input,
                 "all_gather_async called twice on the same "
                 "allocation without intervening wait_work");
     pending_work_map_.emplace(
-        ctx, PendingWork{std::move(work_schedule), output.storage(),
-                         std::move(rank_outputs), input.size(0)});
+        ctx,
+        PendingWork{CollectiveKind::AllGather, std::move(work_schedule),
+                    output.storage(), std::move(rank_outputs), input.size(0)});
     DEBUGINFO("Stored PendingWork for all_gather at ctx=", ctx,
               ", pending_work_map size=", pending_work_map_.size());
   }
@@ -328,8 +335,17 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
   auto stream = getCurrentStream(tensor.device());
   stream.synchronize();
 
-  // For allgather: copy per-rank results into the contiguous output buffer
-  if (!pending.rank_outputs.empty()) {
+  if (pending.kind == CollectiveKind::AllGather) {
+    // _c10d_functional.all_gather_into_tensor concatenates along dim 0 by
+    // contract (see torch/distributed/_functional_collectives.py). Verify
+    // the output was sized accordingly.
+    int64_t world = static_cast<int64_t>(pending.rank_outputs.size());
+    TORCH_CHECK(tensor.size(0) == world * pending.chunk_size,
+                "wait_work: output dim 0 (", tensor.size(0),
+                ") != world_size * chunk_size (", world, " * ",
+                pending.chunk_size,
+                "). all_gather_into_tensor must concatenate along dim 0.");
+
     for (size_t i = 0; i < pending.rank_outputs.size(); i++) {
       tensor
           .narrow(0, static_cast<int64_t>(i) * pending.chunk_size,
