@@ -1314,6 +1314,28 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
             ),
             "expect_fail": ["49159x4096"],
         },
+        # Reversal along a non-stick dim works; the stick (last) dim needs a
+        # gather along the stick dimension, which the backend cannot do, and
+        # a rank-1 flip is always a stick-dim flip. Before issue #3558 the
+        # dim-0 cases compiled clean and returned the last slice broadcast
+        # over the whole axis.
+        ("test_flip", "test_flip_cpu"): {
+            "param_sets": {
+                "2d_dim_0": ([0], cached_randn((67, 256))),
+                "2d_dim_neg2": ([-2], cached_randn((67, 256))),
+                "2d_dim_0_aligned": ([0], cached_randn((64, 256))),
+                "3d_dim_0": ([0], cached_randn((3, 5, 256))),
+                "3d_dim_1": ([1], cached_randn((3, 5, 256))),
+                "3d_dim_0_1": ([0, 1], cached_randn((3, 5, 256))),
+                "4d_dim_0_2": ([0, 2], cached_randn((2, 3, 5, 256))),
+                "2d_size1_dim_0": ([0], cached_randn((1, 256))),
+                "2d_no_dims": ([], cached_randn((67, 256))),
+                # Stick-dim reversals: unsupported, but must fail loudly.
+                "2d_dim_1_stick": ([1], cached_randn((67, 256))),
+                "1d_stick": ([0], cached_randn((256,))),
+            },
+            "expect_fail": ["2d_dim_1_stick", "1d_stick"],
+        },
         ("test_transpose_2d", "test_transpose_2d_cpu"): {
             "param_sets": {
                 "dim_0_2": (
@@ -5567,6 +5589,13 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
     def test_t_2d_contiguous_cpu(self, x):
         # Note: .contiguous() causes issues with eager mode, see https://github.com/torch-spyre/torch-spyre/issues/1149
         self.compare_with_cpu(lambda x: x.t().contiguous(), x, run_eager=False)
+
+    @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
+    def test_flip_cpu(self, dims, x):
+        # Spyre decomposes aten.flip into index_select gathers with a
+        # descending index (see spyre_flip); the arange building that index
+        # falls back to CPU, hence the filtered FallbackWarning.
+        self.compare_with_cpu(lambda x: torch.flip(x, dims), x)
 
     def test_transpose_2d_cpu(self, dim0: int, dim1: int, x):
         self.compare_with_cpu(lambda x: torch.transpose(x, dim0, dim1), x)
