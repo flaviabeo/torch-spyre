@@ -211,10 +211,9 @@ at::Tensor spyre_allgather_async_impl(const at::Tensor& input,
     TORCH_CHECK(context != nullptr, "Failed to get spyre-comms world context");
   }
 
-  TORCH_CHECK(
-      group_size > 0 && group_size <= static_cast<int64_t>(context->getSize()),
-      "group_size out of range: ", group_size, " (world size is ",
-      context->getSize(), ")");
+  TORCH_CHECK(group_size == static_cast<int64_t>(context->getSize()),
+              "group_size must equal world size: got ", group_size,
+              " (world size is ", context->getSize(), ")");
 
   // Use the actual device buffer size (from SpyreTensorLayout) as a flat 1D
   // shape. The device buffer may be larger than the logical tensor (e.g. due to
