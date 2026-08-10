@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Torch-Spyre Authors.
+ * Copyright 2026 The Torch-Spyre Authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -102,11 +102,27 @@ const flex::CompositeAddress* get_composite_address(const at::Tensor& tensor) {
   return &ctx->composite_addr;
 }
 
+// Drain all pending async collective operations.  Spyre hardware cannot
+// overlap multiple collective communications, so any new collective must
+// wait for all prior in-flight operations to finish first.
+void drain_pending_work() {
+  std::lock_guard<std::mutex> lock(work_map_mutex_);
+  for (auto& [key, pw] : pending_work_map_) {
+    if (pw.work) {
+      pw.work->wait();
+      pw.work = nullptr;
+    }
+  }
+}
+
 // Async broadcast implementation - returns immediately
 at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
                                       const std::string& group_name) {
   DEBUGINFO("spyre::broadcast_async called with src_rank=", src_rank,
             ", group=", group_name);
+
+  // Drain prior in-flight collectives — hardware cannot overlap.
+  drain_pending_work();
 
   // Get world context
   auto context = spyre_comms::get_world_context();
@@ -203,6 +219,21 @@ at::Tensor spyre_allreduce_async_impl(const at::Tensor& input,
                                       const std::string& group_name) {
   DEBUGINFO("spyre::all_reduce_async called with reduce_op=", reduce_op,
             ", group=", group_name);
+  TORCH_CHECK(false, "Unsupported reduce_op for spyre reduce: ", reduce_op,
+              ". Only 'sum' is currently supported.");
+}
+
+// Reduce implementation — reduces tensor across all ranks to dst_rank.
+// Operates in-place on the input buffer. Synchronous: device cannot overlap
+// compute and comms.
+at::Tensor spyre_reduce_async_impl(const at::Tensor& input, int64_t dst_rank,
+                                   const std::string& reduce_op,
+                                   const std::string& group_name) {
+  DEBUGINFO("spyre::reduce_async called with dst_rank=", dst_rank,
+            ", reduce_op=", reduce_op, ", group=", group_name);
+
+  // Drain prior in-flight collectives — hardware cannot overlap.
+  drain_pending_work();
 
   // Get world context
   auto context = spyre_comms::get_world_context();
@@ -322,8 +353,9 @@ TORCH_LIBRARY(spyre, m) {
   m.def(
       "all_reduce_async(Tensor(a!) input, str reduce_op=\"sum\", "
       "str group_name=\"default\") -> Tensor(a)");
-  // wait_work mutates the tensor in-place (fills in the received data)
-
+  m.def(
+      "reduce_async(Tensor(a!) input, int dst_rank, str reduce_op=\"sum\", "
+      "str group_name=\"default\") -> Tensor(a)");
   m.def("wait_work(Tensor(a!) tensor) -> Tensor(a)");
 }
 
@@ -331,5 +363,6 @@ TORCH_LIBRARY(spyre, m) {
 TORCH_LIBRARY_IMPL(spyre, PrivateUse1, m) {
   m.impl("broadcast_async", &spyre::spyre_broadcast_async_impl);
   m.impl("all_reduce_async", &spyre::spyre_allreduce_async_impl);
+  m.impl("reduce_async", &spyre::spyre_reduce_async_impl);
   m.impl("wait_work", &spyre::spyre_wait_work_impl);
 }
