@@ -25,8 +25,8 @@ At compile time:
         y = wait_work(y)
         z = broadcast_async(y, src_rank=0, group)
 
-The hoist_collectives pass then moves reduce_async as early as possible
-in the schedule, maximizing the overlap window with independent compute.
+Inductor's scheduler naturally places reduce_async as early as its
+dependencies allow, maximizing the overlap window with independent compute.
 
 Usage:
     torchrun --nproc-per-node 2 allreduce_compiled_decomposed.py
@@ -83,7 +83,6 @@ def demo_overlap_opportunity(comm_rank, comm_size):
     class OverlapModule(torch.nn.Module):
         def forward(self, x, y):
             # This allreduce is decomposed into reduce + broadcast.
-            # The hoist_collectives pass moves reduce_async early.
             reduced = torch.ops._c10d_functional.all_reduce(x, "sum", _GROUP_NAME)
 
             # Independent compute — can potentially overlap with communication

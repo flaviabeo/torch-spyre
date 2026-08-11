@@ -1693,9 +1693,6 @@ def lower_c10d_all_reduce_decomposed(tensor, reduce_op, group_name):
             y = reduce_async(x, dst_rank=0, op, group)
             y_waited = wait_work(y)
             z = broadcast_async(y_waited, src_rank=0, group)
-
-    The hoist_collectives pass will then move reduce_async as early as
-    possible for communication-compute overlap.
     """
     from .collective_decomposer import decompose_allreduce
 
