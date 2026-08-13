@@ -163,11 +163,6 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
   spyre_comms::Tensor buffer_tensor(tensor_info);
   buffer_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
 
-  // Synchronize compute stream: drain pending SDSC kernels before starting
-  // communication — Spyre hardware cannot overlap compute and comms.
-  auto stream = getCurrentStream(input.device());
-  stream.synchronize();
-
   // Start broadcast (non-blocking)
   auto work_schedule = context->broadcast(
       buffer_tensor, static_cast<spyre_comms::process_id_t>(src_rank));
@@ -261,11 +256,6 @@ at::Tensor spyre_allgather_async_impl(const at::Tensor& input,
     output_tensors.push_back(std::move(out_tensor));
   }
 
-  // Synchronize compute stream: drain pending SDSC kernels before starting
-  // communication — Spyre hardware cannot overlap compute and comms.
-  auto stream = getCurrentStream(input.device());
-  stream.synchronize();
-
   auto work_schedule = context->allgather(output_tensors, input_tensor);
   TORCH_CHECK(work_schedule != nullptr,
               "All_gather operation failed to create work schedule");
@@ -328,12 +318,6 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
     DEBUGINFO("WorkSchedule wait completed");
   }
 
-  // Synchronize compute stream after communication completes: the compute
-  // hardware cannot start new kernels until the communication fabric has
-  // fully released resources.
-  auto stream = getCurrentStream(tensor.device());
-  stream.synchronize();
-
   if (pending.kind == CollectiveKind::AllGather) {
     // _c10d_functional.all_gather_into_tensor concatenates along dim 0 by
     // contract (see torch/distributed/_functional_collectives.py). Verify
@@ -354,6 +338,8 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
     DEBUGINFO("Assembled allgather output from ", pending.rank_outputs.size(),
               " rank buffers");
   }
+  // For Broadcast the output data is already in tensor — the collective
+  // operates in-place so no further data manipulation is needed.
 
   return tensor;
 }
