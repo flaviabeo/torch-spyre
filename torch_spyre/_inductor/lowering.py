@@ -36,6 +36,7 @@ from .constants import (
 )
 from . import config
 import torch_spyre._inductor.customops  # noqa: F401
+import torch_spyre._inductor.distributed.spyre_library  # noqa: F401
 from torch_spyre.ops.fallbacks import fallback_ops
 from .ir import (
     SpyreReduction,
