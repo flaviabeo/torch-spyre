@@ -437,6 +437,8 @@ TORCH_LIBRARY(spyre, m) {
       "broadcast_async(Tensor input, int src_rank, str group_name) -> Tensor");
   m.def(
       "all_gather_async(Tensor input, SymInt group_size=1, "
+      "str group_name=\"default\") -> Tensor");
+  m.def(
       "all_reduce_async(Tensor(a!) input, str reduce_op=\"sum\", "
       "str group_name=\"default\") -> Tensor(a)");
   m.def("wait_work(Tensor(a!) tensor) -> Tensor(a)");
