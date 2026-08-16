@@ -42,16 +42,15 @@ enum class CollectiveKind { Broadcast, AllGather, AllReduce };
 struct PendingWork {
   CollectiveKind kind;
   std::shared_ptr<spyre_comms::WorkSchedule> work;
-  c10::Storage storage;
   std::vector<at::Tensor> rank_outputs;
-  int64_t chunk_size = 0;  // elements per rank along dim 0
+  int64_t chunk_size = 0;
   std::vector<at::Tensor> hold_tensors;
 };
 
 // Global map to track pending async operations.
-// Key: SharedOwnerCtx* (stable per-allocation identity). PendingWork holds a
-// Storage reference that prevents the key from being freed while communication
-// is in flight.
+// Key: SharedOwnerCtx* (stable per-allocation identity). PendingWork holds
+// tensor references (hold_tensors) that prevent the key from being freed
+// while communication is in flight.
 static std::unordered_map<spyre::SharedOwnerCtx*, PendingWork>
     pending_work_map_;
 static std::mutex work_map_mutex_;
@@ -171,14 +170,16 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
 
   work_schedule->start();  // Start but DON'T wait
 
-  // Store WorkSchedule and Storage in map to keep the allocation alive
+  // Store WorkSchedule in map; hold_tensors keeps the allocation alive
   {
     std::lock_guard<std::mutex> lock(work_map_mutex_);
     TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
                 "broadcast_async called twice on the same allocation without "
                 "intervening wait_work");
-    pending_work_map_.emplace(ctx, PendingWork{std::move(work_schedule),
-                                               CollectiveKind::Broadcast,
+    pending_work_map_.emplace(ctx, PendingWork{CollectiveKind::Broadcast,
+                                               std::move(work_schedule),
+                                               {},
+                                               0,
                                                {output}});
     DEBUGINFO("Stored PendingWork at ctx=", ctx,
               ", pending_work_map size=", pending_work_map_.size());
@@ -186,14 +187,13 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
 
   return output;  // Return immediately without waiting
 }
-
-/ Async all_gather : allocates one output buffer per rank,
-    submits
-        // context->allgather without waiting, and defers assembly into the
-        // contiguous output tensor to wait_work.
-        at::Tensor
-        spyre_allgather_async_impl(const at::Tensor& input, int64_t group_size,
-                                   const std::string& group_name) {
+// Async all_gather : allocates one output buffer per rank,
+//     submits
+//         // context->allgather without waiting, and defers assembly into the
+//         // contiguous output tensor to wait_work.
+at::Tensor spyre_allgather_async_impl(const at::Tensor& input,
+                                      int64_t group_size,
+                                      const std::string& group_name) {
   DEBUGINFO("spyre::all_gather_async called with group_size=", group_size,
             ", group=", group_name);
 
@@ -277,10 +277,11 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
     TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
                 "all_gather_async called twice on the same "
                 "allocation without intervening wait_work");
-    pending_work_map_.emplace(
-        ctx,
-        PendingWork{CollectiveKind::AllGather, std::move(work_schedule),
-                    output.storage(), std::move(rank_outputs), input.size(0)});
+    pending_work_map_.emplace(ctx, PendingWork{CollectiveKind::AllGather,
+                                               std::move(work_schedule),
+                                               std::move(rank_outputs),
+                                               input.size(0),
+                                               {output}});
     DEBUGINFO("Stored PendingWork for all_gather at ctx=", ctx,
               ", pending_work_map size=", pending_work_map_.size());
   }
@@ -358,9 +359,11 @@ at::Tensor spyre_allreduce_async_impl(const at::Tensor& input,
     TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
                 "all_reduce_async called twice on the same "
                 "allocation without intervening wait_work");
-    pending_work_map_.emplace(
-        ctx, PendingWork{
-                 std::move(work_schedule), CollectiveKind::AllReduce, {input}});
+    pending_work_map_.emplace(ctx, PendingWork{CollectiveKind::AllReduce,
+                                               std::move(work_schedule),
+                                               {},
+                                               0,
+                                               {input}});
     DEBUGINFO("Stored PendingWork for all_reduce at ctx=", ctx,
               ", pending_work_map size=", pending_work_map_.size());
   }
