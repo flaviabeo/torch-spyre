@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Torch-Spyre Authors.
+ * Copyright 2026 The Torch-Spyre Authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -108,11 +108,25 @@ const flex::CompositeAddress* get_composite_address(const at::Tensor& tensor) {
   return &ctx->composite_addr;
 }
 
+// Drain all pending async collective operations.
+void drain_pending_work() {
+  std::lock_guard<std::mutex> lock(work_map_mutex_);
+  for (auto& [key, pw] : pending_work_map_) {
+    if (pw.work) {
+      pw.work->wait();
+      pw.work = nullptr;
+    }
+  }
+}
+
 // Async broadcast implementation - returns immediately
 at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
                                       const std::string& group_name) {
   DEBUGINFO("spyre::broadcast_async called with src_rank=", src_rank,
             ", group=", group_name);
+
+  // Drain prior in-flight collectives — hardware cannot overlap.
+  drain_pending_work();
 
   // Get world context
   auto context = spyre_comms::get_world_context();
@@ -163,11 +177,12 @@ at::Tensor spyre_broadcast_async_impl(const at::Tensor& input, int64_t src_rank,
   spyre_comms::Tensor buffer_tensor(tensor_info);
   buffer_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
 
-  // Start broadcast (non-blocking)
-  auto work_schedule = context->broadcast(
-      buffer_tensor, static_cast<spyre_comms::process_id_t>(src_rank));
+  auto wsi = context->broadcast(
+      tensor_info, static_cast<spyre_comms::process_id_t>(src_rank));
+  TORCH_CHECK(wsi != nullptr, "Broadcast failed to create WorkScheduleInfo");
+  auto work_schedule = context->broadcast_applyTensor(*wsi, buffer_tensor);
   TORCH_CHECK(work_schedule != nullptr,
-              "Broadcast operation failed to create work schedule");
+              "Broadcast applyTensor failed to create WorkSchedule");
 
   work_schedule->start();  // Start but DON'T wait
 
@@ -245,9 +260,11 @@ at::Tensor spyre_allreduce_async_impl(const at::Tensor& input,
                                    input.storage().data_ptr().get());
   inout_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
 
-  auto work_schedule = context->allreduce(inout_tensor, op_type);
+  auto wsi = context->allreduce(tensor_info, op_type);
+  TORCH_CHECK(wsi != nullptr, "Allreduce failed to create WorkScheduleInfo");
+  auto work_schedule = context->allreduce_applyTensor(*wsi, inout_tensor);
   TORCH_CHECK(work_schedule != nullptr,
-              "All_reduce operation failed to create work schedule");
+              "Allreduce applyTensor failed to create WorkSchedule");
 
   work_schedule->start();
 
@@ -255,7 +272,7 @@ at::Tensor spyre_allreduce_async_impl(const at::Tensor& input,
   {
     std::lock_guard<std::mutex> lock(work_map_mutex_);
     TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
-                "all_reduce_async called twice on the same "
+                "reduce_async called twice on the same "
                 "allocation without intervening wait_work");
     pending_work_map_.emplace(
         ctx, PendingWork{
@@ -265,6 +282,88 @@ at::Tensor spyre_allreduce_async_impl(const at::Tensor& input,
   }
 
   return input;  // Return the same tensor (allreduce operates in-place)
+}
+
+// Reduce implementation — reduces tensor across all ranks to dst_rank.
+// Operates in-place on the input buffer. Synchronous: device cannot overlap
+// compute and comms.
+at::Tensor spyre_reduce_async_impl(const at::Tensor& input, int64_t dst_rank,
+                                   const std::string& reduce_op,
+                                   const std::string& group_name) {
+  DEBUGINFO("spyre::reduce_async called with dst_rank=", dst_rank,
+            ", reduce_op=", reduce_op, ", group=", group_name);
+
+  // Drain prior in-flight collectives — hardware cannot overlap.
+  drain_pending_work();
+
+  // Get world context
+  auto context = spyre_comms::get_world_context();
+  if (context == nullptr) {
+    DEBUGINFO("Initializing spyre-comms library");
+    spyre_comms::initialize_library(spyre::GlobalRuntime::get(),
+                                    spyre::getDefaultStreamRuntimeHandle());
+    context = spyre_comms::get_world_context();
+    TORCH_CHECK(context != nullptr, "Failed to get spyre-comms world context");
+  }
+
+  auto op_type = parse_reduce_op(reduce_op);
+
+  TORCH_CHECK(input.is_privateuseone(),
+              "Tensor must be on Spyre device for reduce");
+  TORCH_CHECK(input.is_contiguous(), "Tensor must be contiguous for reduce");
+  TORCH_CHECK(input.nbytes() > 0, "Tensor must have non-zero size for reduce");
+  TORCH_CHECK(
+      dst_rank >= 0 && dst_rank < static_cast<int64_t>(context->getSize()),
+      "dst_rank out of range: ", dst_rank, " (world_size=", context->getSize(),
+      ")");
+
+  // Get SharedOwnerCtx for the input tensor
+  auto* ctx = static_cast<spyre::SharedOwnerCtx*>(
+      input.storage().data_ptr().get_context());
+  TORCH_CHECK(ctx != nullptr, "SharedOwnerCtx is null for input tensor");
+
+  SpyreTensorLayout stl = get_spyre_tensor_layout(input);
+  uint64_t ar_nbytes = get_device_size_in_bytes(stl);
+  int64_t ar_total_elems =
+      static_cast<int64_t>(ar_nbytes / input.element_size());
+
+  spyre_comms::TensorDataTypeEnum dtype =
+      torch_dtype_to_spyre_comms(input.scalar_type());
+  spyre_comms::TensorShape shape({ar_total_elems});
+  spyre_comms::TensorInfo tensor_info(dtype, shape);
+
+  // Create tensor with host pointer + device address.
+  spyre_comms::Tensor inout_tensor(tensor_info,
+                                   input.storage().data_ptr().get());
+  inout_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
+
+  // Use allreduce as the underlying primitive — the standalone reduce
+  // primitive is not yet supported by the hardware.  Allreduce writes the
+  // result to all ranks, so the subsequent broadcast_async in the
+  // decomposition becomes a redundant copy but remains correct.
+  auto wsi = context->reduce(tensor_info, op_type,
+                             static_cast<spyre_comms::process_id_t>(dst_rank));
+  TORCH_CHECK(wsi != nullptr, "Reduce failed to create WorkScheduleInfo");
+  auto work_schedule = context->reduce_applyTensor(*wsi, inout_tensor);
+  TORCH_CHECK(work_schedule != nullptr,
+              "Reduce applyTensor failed to create WorkSchedule");
+
+  work_schedule->start();
+
+  // Store WorkSchedule in map for later wait_work call
+  {
+    std::lock_guard<std::mutex> lock(work_map_mutex_);
+    TORCH_CHECK(pending_work_map_.find(ctx) == pending_work_map_.end(),
+                "reduce_async called twice on the same "
+                "allocation without intervening wait_work");
+    pending_work_map_.emplace(
+        ctx, PendingWork{
+                 std::move(work_schedule), CollectiveKind::AllReduce, {input}});
+    DEBUGINFO("Stored PendingWork for all_reduce at ctx=", ctx,
+              ", pending_work_map size=", pending_work_map_.size());
+  }
+
+  return input;
 }
 
 // Wait for async operation to complete
@@ -293,9 +392,12 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
               pending_work_map_.size());
   }
 
-  // Lock released — concurrent wait_work and broadcast_async can now proceed
-  work_to_wait->wait();
-  DEBUGINFO("WorkSchedule wait completed");
+  // Lock released — concurrent wait_work and broadcast_async can now proceed.
+  // work may be null if drain_pending_work() already completed it.
+  if (work_to_wait) {
+    work_to_wait->wait();
+    DEBUGINFO("WorkSchedule wait completed");
+  }
 
   // Return the tensor with completed collective data (broadcast or allreduce)
   return tensor;
@@ -310,8 +412,9 @@ TORCH_LIBRARY(spyre, m) {
   m.def(
       "all_reduce_async(Tensor(a!) input, str reduce_op=\"sum\", "
       "str group_name=\"default\") -> Tensor(a)");
-  // wait_work mutates the tensor in-place (fills in the received data)
-
+  m.def(
+      "reduce_async(Tensor(a!) input, int dst_rank, str reduce_op=\"sum\", "
+      "str group_name=\"default\") -> Tensor(a)");
   m.def("wait_work(Tensor(a!) tensor) -> Tensor(a)");
 }
 
@@ -319,5 +422,6 @@ TORCH_LIBRARY(spyre, m) {
 TORCH_LIBRARY_IMPL(spyre, PrivateUse1, m) {
   m.impl("broadcast_async", &spyre::spyre_broadcast_async_impl);
   m.impl("all_reduce_async", &spyre::spyre_allreduce_async_impl);
+  m.impl("reduce_async", &spyre::spyre_reduce_async_impl);
   m.impl("wait_work", &spyre::spyre_wait_work_impl);
 }

@@ -42,6 +42,7 @@ from .ir import (
     SpyreConstantFallback,
     SpyreEmptyFallback,
     BroadcastAsyncFallback,
+    ReduceAsyncFallback,
     WaitWorkFallback,
     AllReduceAsyncFallback,
 )
@@ -1898,3 +1899,49 @@ def lower_c10d_all_reduce_inplace(tensor, reduce_op, group_name):
             group_name,
         )
     )
+
+
+# ============================================================================
+# Compile-Time Collective Decomposition
+# ============================================================================
+@register_spyre_lowering(torch.ops._c10d_functional.all_reduce.default)
+def lower_c10d_all_reduce_decomposed(tensor, reduce_op, group_name):
+    """Decompose allreduce into reduce_async + wait + broadcast_async."""
+    logger.debug(
+        "Decomposing all_reduce (op=%s, group='%s') into reduce + broadcast",
+        reduce_op,
+        group_name,
+    )
+
+    tensor.realize()
+
+    reduced = ir.TensorBox.create(
+        ReduceAsyncFallback(
+            torch.ops.spyre.reduce_async.default,
+            tensor,
+            0,
+            reduce_op,
+            group_name,
+        )
+    )
+    waited = ir.TensorBox.create(
+        WaitWorkFallback(
+            torch.ops.spyre.wait_work.default,
+            reduced,
+        )
+    )
+    broadcast = ir.TensorBox.create(
+        BroadcastAsyncFallback(
+            torch.ops.spyre.broadcast_async.default,
+            waited,
+            0,
+            group_name,
+        )
+    )
+    return broadcast
+
+
+@register_spyre_lowering(torch.ops._c10d_functional.all_reduce_.default)
+def lower_c10d_all_reduce_inplace_decomposed(tensor, reduce_op, group_name):
+    """In-place variant — same decomposition as the functional all_reduce."""
+    return lower_c10d_all_reduce_decomposed(tensor, reduce_op, group_name)

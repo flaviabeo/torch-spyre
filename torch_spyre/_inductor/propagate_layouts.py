@@ -67,6 +67,7 @@ from .constants import (
 from .ir import (
     AllReduceAsyncFallback,
     FixedTiledLayout,
+    ReduceAsyncFallback,
     SpyreConstantFallback,
     SpyreEmptyFallback,
     BroadcastAsyncFallback,
@@ -1956,6 +1957,7 @@ def propagate_spyre_tensor_layouts(
                 BroadcastAsyncFallback,
                 WaitWorkFallback,
                 AllReduceAsyncFallback,
+                ReduceAsyncFallback,
             ),
         ):
             input_name = op.inputs[0].get_name()

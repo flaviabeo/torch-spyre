@@ -22,6 +22,7 @@ from .ir import (
     SpyreEmptyFallback,
     AllReduceAsyncFallback,
     BroadcastAsyncFallback,
+    ReduceAsyncFallback,
     WaitWorkFallback,
 )
 from torch._inductor.ir import (
@@ -1555,6 +1556,7 @@ def _iter_computed_buffers(operations: list[Operation]):
                 op,
                 (
                     BroadcastAsyncFallback,
+                    ReduceAsyncFallback,
                     WaitWorkFallback,
                     AllReduceAsyncFallback,
                 ),
