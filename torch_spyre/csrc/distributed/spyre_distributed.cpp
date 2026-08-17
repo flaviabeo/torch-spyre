@@ -56,8 +56,13 @@ static std::mutex work_map_mutex_;
 
 // Compile-time WSI (WorkScheduleInfo) cache.
 // Plan ops store their wsi here at graph-load time; run ops look it up by
-// index.
-static std::vector<std::unique_ptr<spyre_comms::WorkScheduleInfo>> wsi_cache_;
+// index.  We cache the TensorInfo alongside the WSI so run ops construct
+// their spyre_comms::Tensor with the exact same shape, avoiding mismatches.
+struct CachedPlan {
+  std::unique_ptr<spyre_comms::WorkScheduleInfo> wsi;
+  spyre_comms::TensorInfo tensor_info;
+};
+static std::vector<CachedPlan> wsi_cache_;
 static std::mutex wsi_cache_mutex_;
 
 // Helper to convert PyTorch ScalarType to spyre_comms TensorDataTypeEnum
@@ -176,7 +181,7 @@ int64_t spyre_broadcast_plan_impl(int64_t num_elems, int64_t dtype_code,
 
   std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
   int64_t handle = static_cast<int64_t>(wsi_cache_.size());
-  wsi_cache_.push_back(std::move(wsi));
+  wsi_cache_.push_back(CachedPlan{std::move(wsi), tensor_info});
   DEBUGINFO("broadcast_plan: cached WSI at handle=", handle);
   return handle;
 }
@@ -200,7 +205,7 @@ int64_t spyre_allreduce_plan_impl(int64_t num_elems, int64_t dtype_code,
 
   std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
   int64_t handle = static_cast<int64_t>(wsi_cache_.size());
-  wsi_cache_.push_back(std::move(wsi));
+  wsi_cache_.push_back(CachedPlan{std::move(wsi), tensor_info});
   DEBUGINFO("allreduce_plan: cached WSI at handle=", handle);
   return handle;
 }
@@ -231,7 +236,7 @@ int64_t spyre_reduce_plan_impl(int64_t num_elems, int64_t dtype_code,
 
   std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
   int64_t handle = static_cast<int64_t>(wsi_cache_.size());
-  wsi_cache_.push_back(std::move(wsi));
+  wsi_cache_.push_back(CachedPlan{std::move(wsi), tensor_info});
   DEBUGINFO("reduce_plan: cached WSI at handle=", handle);
   return handle;
 }
@@ -254,8 +259,8 @@ at::Tensor spyre_broadcast_run_impl(const at::Tensor& input,
   TORCH_CHECK(
       plan_handle >= 0 && plan_handle < static_cast<int64_t>(wsi_cache_.size()),
       "broadcast_run: invalid plan_handle=", plan_handle);
-  const auto& wsi = wsi_cache_[static_cast<size_t>(plan_handle)];
-  TORCH_CHECK(wsi != nullptr, "broadcast_run: WSI at handle is null");
+  const auto& cached = wsi_cache_[static_cast<size_t>(plan_handle)];
+  TORCH_CHECK(cached.wsi != nullptr, "broadcast_run: WSI at handle is null");
 
   // Create output tensor
   at::Tensor output = at::empty_like(input);
@@ -273,21 +278,12 @@ at::Tensor spyre_broadcast_run_impl(const at::Tensor& input,
       output.storage().data_ptr().get_context());
   TORCH_CHECK(ctx != nullptr, "SharedOwnerCtx is null for output tensor");
 
-  // Build spyre_comms::Tensor with device address
-  SpyreTensorLayout stl = get_spyre_tensor_layout(output);
-  uint64_t bcast_nbytes = get_device_size_in_bytes(stl);
-  int64_t bcast_total_elems =
-      static_cast<int64_t>(bcast_nbytes / input.element_size());
-
-  spyre_comms::TensorDataTypeEnum dtype =
-      torch_dtype_to_spyre_comms(input.scalar_type());
-  spyre_comms::TensorShape shape({bcast_total_elems});
-  spyre_comms::TensorInfo tensor_info(dtype, shape);
-
-  spyre_comms::Tensor buffer_tensor(tensor_info);
+  // Build spyre_comms::Tensor using the same TensorInfo from the plan
+  spyre_comms::Tensor buffer_tensor(cached.tensor_info);
   buffer_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
 
-  auto work_schedule = context->broadcast_applyTensor(*wsi, buffer_tensor);
+  auto work_schedule =
+      context->broadcast_applyTensor(*cached.wsi, buffer_tensor);
   TORCH_CHECK(work_schedule != nullptr, "broadcast_run: applyTensor failed");
 
   work_schedule->start();
@@ -324,29 +320,21 @@ at::Tensor spyre_allreduce_run_impl(const at::Tensor& input,
   TORCH_CHECK(
       plan_handle >= 0 && plan_handle < static_cast<int64_t>(wsi_cache_.size()),
       "allreduce_run: invalid plan_handle=", plan_handle);
-  const auto& wsi = wsi_cache_[static_cast<size_t>(plan_handle)];
-  TORCH_CHECK(wsi != nullptr, "allreduce_run: WSI at handle is null");
+  const auto& cached = wsi_cache_[static_cast<size_t>(plan_handle)];
+  TORCH_CHECK(cached.wsi != nullptr, "allreduce_run: WSI at handle is null");
 
   // Get SharedOwnerCtx
   auto* ctx = static_cast<spyre::SharedOwnerCtx*>(
       input.storage().data_ptr().get_context());
   TORCH_CHECK(ctx != nullptr, "SharedOwnerCtx is null for input tensor");
 
-  SpyreTensorLayout stl = get_spyre_tensor_layout(input);
-  uint64_t ar_nbytes = get_device_size_in_bytes(stl);
-  int64_t ar_total_elems =
-      static_cast<int64_t>(ar_nbytes / input.element_size());
-
-  spyre_comms::TensorDataTypeEnum dtype =
-      torch_dtype_to_spyre_comms(input.scalar_type());
-  spyre_comms::TensorShape shape({ar_total_elems});
-  spyre_comms::TensorInfo tensor_info(dtype, shape);
-
-  spyre_comms::Tensor inout_tensor(tensor_info,
+  // Build spyre_comms::Tensor using the same TensorInfo from the plan
+  spyre_comms::Tensor inout_tensor(cached.tensor_info,
                                    input.storage().data_ptr().get());
   inout_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
 
-  auto work_schedule = context->allreduce_applyTensor(*wsi, inout_tensor);
+  auto work_schedule =
+      context->allreduce_applyTensor(*cached.wsi, inout_tensor);
   TORCH_CHECK(work_schedule != nullptr, "allreduce_run: applyTensor failed");
 
   work_schedule->start();
@@ -384,29 +372,20 @@ at::Tensor spyre_reduce_run_impl(const at::Tensor& input, int64_t plan_handle,
   TORCH_CHECK(
       plan_handle >= 0 && plan_handle < static_cast<int64_t>(wsi_cache_.size()),
       "reduce_run: invalid plan_handle=", plan_handle);
-  const auto& wsi = wsi_cache_[static_cast<size_t>(plan_handle)];
-  TORCH_CHECK(wsi != nullptr, "reduce_run: WSI at handle is null");
+  const auto& cached = wsi_cache_[static_cast<size_t>(plan_handle)];
+  TORCH_CHECK(cached.wsi != nullptr, "reduce_run: WSI at handle is null");
 
   // Get SharedOwnerCtx
   auto* ctx = static_cast<spyre::SharedOwnerCtx*>(
       input.storage().data_ptr().get_context());
   TORCH_CHECK(ctx != nullptr, "SharedOwnerCtx is null for input tensor");
 
-  SpyreTensorLayout stl = get_spyre_tensor_layout(input);
-  uint64_t ar_nbytes = get_device_size_in_bytes(stl);
-  int64_t ar_total_elems =
-      static_cast<int64_t>(ar_nbytes / input.element_size());
-
-  spyre_comms::TensorDataTypeEnum dtype =
-      torch_dtype_to_spyre_comms(input.scalar_type());
-  spyre_comms::TensorShape shape({ar_total_elems});
-  spyre_comms::TensorInfo tensor_info(dtype, shape);
-
-  spyre_comms::Tensor inout_tensor(tensor_info,
+  // Build spyre_comms::Tensor using the same TensorInfo from the plan
+  spyre_comms::Tensor inout_tensor(cached.tensor_info,
                                    input.storage().data_ptr().get());
   inout_tensor.SetSpyreDeviceAddressBorrowed(&ctx->composite_addr);
 
-  auto work_schedule = context->reduce_applyTensor(*wsi, inout_tensor);
+  auto work_schedule = context->reduce_applyTensor(*cached.wsi, inout_tensor);
   TORCH_CHECK(work_schedule != nullptr, "reduce_run: applyTensor failed");
 
   work_schedule->start();
@@ -717,16 +696,20 @@ TORCH_LIBRARY(spyre, m) {
       "str group_name=\"default\") -> Tensor(a)");
   m.def("wait_work(Tensor(a!) tensor) -> Tensor(a)");
 
-  // Compile-time plan ops — create WSI once at graph load
+  // Compile-time plan ops — scalar-only, registered with impl directly
+  // so they dispatch via CompositeImplicitAutograd (no tensor to key off).
   m.def(
       "broadcast_plan(int num_elems, int dtype, int src_rank, "
-      "str group_name) -> int");
+      "str group_name) -> int",
+      &spyre::spyre_broadcast_plan_impl);
   m.def(
       "allreduce_plan(int num_elems, int dtype, str reduce_op, "
-      "str group_name) -> int");
+      "str group_name) -> int",
+      &spyre::spyre_allreduce_plan_impl);
   m.def(
       "reduce_plan(int num_elems, int dtype, int dst_rank, "
-      "str reduce_op, str group_name) -> int");
+      "str reduce_op, str group_name) -> int",
+      &spyre::spyre_reduce_plan_impl);
 
   // Runtime run ops — bind cached WSI to a tensor and execute
   m.def(
@@ -745,9 +728,6 @@ TORCH_LIBRARY_IMPL(spyre, PrivateUse1, m) {
   m.impl("reduce_async", &spyre::spyre_reduce_async_impl);
   m.impl("wait_work", &spyre::spyre_wait_work_impl);
 
-  m.impl("broadcast_plan", &spyre::spyre_broadcast_plan_impl);
-  m.impl("allreduce_plan", &spyre::spyre_allreduce_plan_impl);
-  m.impl("reduce_plan", &spyre::spyre_reduce_plan_impl);
   m.impl("broadcast_run", &spyre::spyre_broadcast_run_impl);
   m.impl("allreduce_run", &spyre::spyre_allreduce_run_impl);
   m.impl("reduce_run", &spyre::spyre_reduce_run_impl);

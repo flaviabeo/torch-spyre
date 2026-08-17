@@ -472,9 +472,26 @@ def _compute_device_num_elems(layout) -> int:
     return V.graph.sizevars.size_hint(sympy_product(layout.size))
 
 
+_DTYPE_TO_SCALAR_TYPE: dict[torch.dtype, int] = {
+    torch.uint8: 0,
+    torch.int8: 1,
+    torch.int16: 2,
+    torch.int32: 3,
+    torch.int64: 4,
+    torch.float16: 5,
+    torch.float32: 6,
+    torch.float64: 7,
+    torch.bool: 11,
+    torch.bfloat16: 15,
+}
+
+
 def _dtype_to_int(dtype: torch.dtype) -> int:
     """Convert a torch dtype to its c10::ScalarType integer code."""
-    return int(dtype)
+    code = _DTYPE_TO_SCALAR_TYPE.get(dtype)
+    if code is None:
+        raise ValueError(f"Unsupported dtype for collective plan: {dtype}")
+    return code
 
 
 class BroadcastAsyncFallback(ir.ExternKernel):
