@@ -46,3 +46,41 @@ if torch._C._dispatch_has_kernel("spyre::broadcast_async"):
     def _(x: torch.Tensor) -> torch.Tensor:
         """Fake implementation — pass through the tensor."""
         return x
+
+    # ------------------------------------------------------------------
+    # Compile-time plan ops — return a dummy handle during tracing.
+    # ------------------------------------------------------------------
+
+    @torch.library.register_fake("spyre::broadcast_plan")
+    def _(num_elems: int, dtype: int, src_rank: int, group_name: str) -> int:
+        return 0
+
+    @torch.library.register_fake("spyre::allreduce_plan")
+    def _(num_elems: int, dtype: int, reduce_op: str, group_name: str) -> int:
+        return 0
+
+    @torch.library.register_fake("spyre::reduce_plan")
+    def _(
+        num_elems: int,
+        dtype: int,
+        dst_rank: int,
+        reduce_op: str,
+        group_name: str,
+    ) -> int:
+        return 0
+
+    # ------------------------------------------------------------------
+    # Runtime run ops — shape inference matches the legacy async ops.
+    # ------------------------------------------------------------------
+
+    @torch.library.register_fake("spyre::broadcast_run")
+    def _(x: torch.Tensor, plan_handle: int, src_rank: int) -> torch.Tensor:
+        return torch.empty_strided(x.shape, x.stride(), dtype=x.dtype, device=x.device)
+
+    @torch.library.register_fake("spyre::allreduce_run")
+    def _(x: torch.Tensor, plan_handle: int) -> torch.Tensor:
+        return x
+
+    @torch.library.register_fake("spyre::reduce_run")
+    def _(x: torch.Tensor, plan_handle: int, dst_rank: int) -> torch.Tensor:
+        return x
