@@ -17,7 +17,6 @@ from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 if TYPE_CHECKING:
     from .pass_utils import PerCoreView
 
-import math
 
 from sympy import Expr
 import torch
@@ -34,7 +33,6 @@ from torch_spyre._C import SpyreTensorLayout
 from torch._inductor.codegen.wrapper import (
     PythonWrapperCodegen,
 )
-from torch._inductor.utils import sympy_product
 from torch._inductor.virtualized import V
 import sympy
 from torch.utils._ordered_set import OrderedSet
@@ -455,23 +453,6 @@ class SpyreEmptyFallback(ir.ExternKernel):
         V.graph.register_operation(self)
 
 
-_STICK_BYTES = 128
-
-
-def _compute_device_num_elems(layout) -> int:
-    """Compute the flat device element count from an IR node layout.
-
-    For FixedTiledLayout: uses device_size to compute total sticks * stick bytes.
-    For plain FixedLayout: uses logical numel.
-    """
-    if isinstance(layout, FixedTiledLayout):
-        num_sticks = math.prod(layout.device_layout.device_size[:-1])
-        device_bytes = num_sticks * _STICK_BYTES
-        return device_bytes // layout.dtype.itemsize
-    # Fallback for non-tiled tensors
-    return V.graph.sizevars.size_hint(sympy_product(layout.size))
-
-
 _DTYPE_TO_SCALAR_TYPE: dict[torch.dtype, int] = {
     torch.uint8: 0,
     torch.int8: 1,
@@ -508,16 +489,14 @@ class BroadcastAsyncFallback(ir.ExternKernel):
         src_rank, group_name = self.constant_args
         output_name = self.get_name()
 
-        # Compute device element count from input layout
         input_layout = input_tensor.get_layout()
-        num_elems = _compute_device_num_elems(input_layout)
         dtype_code = _dtype_to_int(input_layout.dtype)
 
         # Emit plan call in header (module-level, runs once at graph load)
         plan_var = f"_bcast_plan_{output_name}"
         plan_line = (
             f"{plan_var} = torch.ops.spyre.broadcast_plan("
-            f"{num_elems}, {dtype_code}, {src_rank}, '{group_name}')"
+            f"{dtype_code}, {src_rank}, '{group_name}')"
         )
         if not hasattr(wrapper, "_emitted_plans"):
             wrapper._emitted_plans = set()
@@ -590,14 +569,13 @@ class AllReduceAsyncFallback(ir.ExternKernel):
         output_name = self.get_name()
 
         input_layout = input_tensor.get_layout()
-        num_elems = _compute_device_num_elems(input_layout)
         dtype_code = _dtype_to_int(input_layout.dtype)
 
         # Emit plan call in header
         plan_var = f"_ar_plan_{output_name}"
         plan_line = (
             f"{plan_var} = torch.ops.spyre.allreduce_plan("
-            f"{num_elems}, {dtype_code}, '{reduce_op}', '{group_name}')"
+            f"{dtype_code}, '{reduce_op}', '{group_name}')"
         )
         if not hasattr(wrapper, "_emitted_plans"):
             wrapper._emitted_plans = set()
@@ -659,15 +637,13 @@ class ReduceAsyncFallback(ir.ExternKernel):
         output_name = self.get_name()
 
         input_layout = input_tensor.get_layout()
-        num_elems = _compute_device_num_elems(input_layout)
         dtype_code = _dtype_to_int(input_layout.dtype)
 
         # Emit plan call in header
         plan_var = f"_reduce_plan_{output_name}"
         plan_line = (
             f"{plan_var} = torch.ops.spyre.reduce_plan("
-            f"{num_elems}, {dtype_code}, {dst_rank}, '{reduce_op}', "
-            f"'{group_name}')"
+            f"{dtype_code}, {dst_rank}, '{reduce_op}', '{group_name}')"
         )
         if not hasattr(wrapper, "_emitted_plans"):
             wrapper._emitted_plans = set()
