@@ -12,24 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Compile-time allreduce decomposition demo.
+"""Compiled allreduce demo.
 
-This example demonstrates how torch.compile decomposes allreduce into
-reduce + broadcast at compile time, giving the Inductor compiler visibility
-into the sub-operations for better scheduling and communication-compute
-overlap.
+This example demonstrates how torch.compile lowers allreduce into a
+two-phase plan/run pattern via Spyre's compile-time collective ops:
 
-At compile time:
-    allreduce(x, "sum", group) is decomposed into:
-        y = reduce_async(x, dst_rank=0, "sum", group)
-        y = wait_work(y)
-        z = broadcast_async(y, src_rank=0, group)
+At graph load (compile-time):
+    plan_handle = allreduce_plan(dtype, "sum", group)
 
-Inductor's scheduler naturally places reduce_async as early as its
-dependencies allow, maximizing the overlap window with independent compute.
+At every forward pass (runtime):
+    y = allreduce_run(x, plan_handle)
+    y = wait_work(y)
+
+The plan creates the WorkScheduleInfo (communication plan) once, and the
+run op reuses it on every invocation — avoiding repeated planning overhead.
 
 Usage:
-    torchrun --nproc-per-node 2 allreduce_compiled_decomposed.py
+    torchrun --nproc-per-node 2 all_reduce_compiled.py
 """
 
 import os
@@ -47,7 +46,7 @@ _GROUP_NAME = "default"
 
 def demo_basic_allreduce(comm_rank, comm_size):
     """Basic compiled allreduce — each rank contributes ones, result = world_size."""
-    print(f"[Rank {comm_rank}] Demo 1: Basic compiled allreduce (decomposed)")
+    print(f"[Rank {comm_rank}] Demo 1: Basic compiled allreduce")
 
     class AllReduceModule(torch.nn.Module):
         def forward(self, x):
@@ -74,15 +73,13 @@ def demo_basic_allreduce(comm_rank, comm_size):
 def demo_overlap_opportunity(comm_rank, comm_size):
     """Compute interleaved with allreduce — demonstrates overlap potential.
 
-    The decomposition allows the compiler to schedule the reduce_async early,
-    overlap independent compute (y * 3.0) during communication, then
-    broadcast_async and finally combine results.
+    The compiler schedules allreduce_run as early as its dependencies allow,
+    maximizing the overlap window between communication and independent compute.
     """
     print(f"[Rank {comm_rank}] Demo 2: Communication-compute overlap opportunity")
 
     class OverlapModule(torch.nn.Module):
         def forward(self, x, y):
-            # This allreduce is decomposed into reduce + broadcast.
             reduced = torch.ops._c10d_functional.all_reduce(x, "sum", _GROUP_NAME)
 
             # Independent compute — can potentially overlap with communication
@@ -119,12 +116,11 @@ def demo_overlap_opportunity(comm_rank, comm_size):
 
 
 def demo_multiple_allreduce(comm_rank, comm_size):
-    """Multiple allreduce operations — each decomposes independently."""
-    print(f"[Rank {comm_rank}] Demo 3: Multiple decomposed allreduce operations")
+    """Multiple allreduce operations in one compiled graph."""
+    print(f"[Rank {comm_rank}] Demo 3: Multiple compiled allreduce operations")
 
     class MultiAllReduceModule(torch.nn.Module):
         def forward(self, a, b):
-            # Two independent allreduce operations, each decomposed
             ar_a = torch.ops._c10d_functional.all_reduce(a, "sum", _GROUP_NAME)
             ar_b = torch.ops._c10d_functional.all_reduce(b, "sum", _GROUP_NAME)
             result_a = torch.ops._c10d_functional.wait_tensor(ar_a)

@@ -162,79 +162,8 @@ spyre_comms::SpyreReductionOpType parse_reduce_op(
 }
 
 // ============================================================================
-// Compile-time plan ops — store collective parameters at graph load.
-// The actual WSI is created lazily on the first run call when we have the
-// real tensor and its device layout.
-// ============================================================================
-
-int64_t spyre_broadcast_plan_impl(int64_t dtype_code, int64_t src_rank,
-                                  const std::string& group_name) {
-  DEBUGINFO("spyre::broadcast_plan called with dtype=", dtype_code,
-            ", src_rank=", src_rank);
-
-  auto context = ensure_context();
-  TORCH_CHECK(
-      src_rank >= 0 && src_rank < static_cast<int64_t>(context->getSize()),
-      "src_rank out of range: ", src_rank, " (world size is ",
-      context->getSize(), ")");
-
-  auto dtype =
-      torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
-
-  std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
-  int64_t handle = static_cast<int64_t>(wsi_cache_.size());
-  wsi_cache_.push_back(CachedPlan{PlanKind::Broadcast, dtype, src_rank,
-                                  spyre_comms::SpyreReductionOpType::SUM,
-                                  nullptr, 0});
-  DEBUGINFO("broadcast_plan: stored params at handle=", handle);
-  return handle;
-}
-
-int64_t spyre_allreduce_plan_impl(int64_t dtype_code,
-                                  const std::string& reduce_op,
-                                  const std::string& group_name) {
-  DEBUGINFO("spyre::allreduce_plan called with dtype=", dtype_code,
-            ", reduce_op=", reduce_op);
-
-  ensure_context();
-  auto op_type = parse_reduce_op(reduce_op);
-  auto dtype =
-      torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
-
-  std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
-  int64_t handle = static_cast<int64_t>(wsi_cache_.size());
-  wsi_cache_.push_back(
-      CachedPlan{PlanKind::AllReduce, dtype, 0, op_type, nullptr, 0});
-  DEBUGINFO("allreduce_plan: stored params at handle=", handle);
-  return handle;
-}
-
-int64_t spyre_reduce_plan_impl(int64_t dtype_code, int64_t dst_rank,
-                               const std::string& reduce_op,
-                               const std::string& group_name) {
-  DEBUGINFO("spyre::reduce_plan called with dtype=", dtype_code,
-            ", dst_rank=", dst_rank, ", reduce_op=", reduce_op);
-
-  auto context = ensure_context();
-  TORCH_CHECK(
-      dst_rank >= 0 && dst_rank < static_cast<int64_t>(context->getSize()),
-      "dst_rank out of range: ", dst_rank, " (world_size=", context->getSize(),
-      ")");
-
-  auto op_type = parse_reduce_op(reduce_op);
-  auto dtype =
-      torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
-
-  std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
-  int64_t handle = static_cast<int64_t>(wsi_cache_.size());
-  wsi_cache_.push_back(
-      CachedPlan{PlanKind::Reduce, dtype, dst_rank, op_type, nullptr, 0});
-  DEBUGINFO("reduce_plan: stored params at handle=", handle);
-  return handle;
-}
-
-// ============================================================================
-// Runtime run ops — create WSI on first call, then reuse it.
+// Compile-time plan ops — store collective parameters at graph load + create
+// WSI
 // ============================================================================
 
 // Compute device element count from a Spyre tensor's layout.
@@ -274,14 +203,26 @@ void ensure_wsi(CachedPlan& plan, int64_t num_elems,
   TORCH_CHECK(plan.wsi != nullptr, "Failed to create WSI");
 }
 
-at::Tensor spyre_broadcast_run_impl(const at::Tensor& input,
-                                    int64_t plan_handle, int64_t src_rank) {
-  DEBUGINFO("spyre::broadcast_run called with plan_handle=", plan_handle,
+int64_t spyre_broadcast_plan_impl(int64_t dtype_code, int64_t src_rank,
+                                  const std::string& group_name) {
+  DEBUGINFO("spyre::broadcast_plan called with dtype=", dtype_code,
             ", src_rank=", src_rank);
 
-  drain_pending_work();
-
   auto context = ensure_context();
+
+  TORCH_CHECK(
+      src_rank >= 0 && src_rank < static_cast<int64_t>(context->getSize()),
+      "src_rank out of range: ", src_rank, " (world size is ",
+      context->getSize(), ")");
+
+  auto dtype =
+      torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
+
+  std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
+  int64_t handle = static_cast<int64_t>(wsi_cache_.size());
+  wsi_cache_.push_back(CachedPlan{PlanKind::Broadcast, dtype, src_rank,
+                                  spyre_comms::SpyreReductionOpType::SUM,
+                                  nullptr, 0});
 
   // Look up plan and lazily create WSI
   std::lock_guard<std::mutex> cache_lock(wsi_cache_mutex_);
@@ -292,6 +233,88 @@ at::Tensor spyre_broadcast_run_impl(const at::Tensor& input,
 
   int64_t num_elems = compute_device_elems(input);
   ensure_wsi(plan, num_elems, context);
+
+  DEBUGINFO("broadcast_plan: stored params at handle=", handle);
+  return handle;
+}
+
+int64_t spyre_allreduce_plan_impl(int64_t dtype_code,
+                                  const std::string& reduce_op,
+                                  const std::string& group_name) {
+  DEBUGINFO("spyre::allreduce_plan called with dtype=", dtype_code,
+            ", reduce_op=", reduce_op);
+
+  ensure_context();
+  auto op_type = parse_reduce_op(reduce_op);
+  auto dtype =
+      torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
+
+  std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
+  int64_t handle = static_cast<int64_t>(wsi_cache_.size());
+  wsi_cache_.push_back(
+      CachedPlan{PlanKind::AllReduce, dtype, 0, op_type, nullptr, 0});
+
+  // Look up plan and create WSI
+  std::lock_guard<std::mutex> cache_lock(wsi_cache_mutex_);
+  TORCH_CHECK(
+      plan_handle >= 0 && plan_handle < static_cast<int64_t>(wsi_cache_.size()),
+      "allreduce_run: invalid plan_handle=", plan_handle);
+  auto& plan = wsi_cache_[static_cast<size_t>(plan_handle)];
+
+  int64_t num_elems = compute_device_elems(input);
+  ensure_wsi(plan, num_elems, context);
+
+  DEBUGINFO("allreduce_plan: stored params at handle=", handle);
+  return handle;
+}
+
+int64_t spyre_reduce_plan_impl(int64_t dtype_code, int64_t dst_rank,
+                               const std::string& reduce_op,
+                               const std::string& group_name) {
+  DEBUGINFO("spyre::reduce_plan called with dtype=", dtype_code,
+            ", dst_rank=", dst_rank, ", reduce_op=", reduce_op);
+
+  auto context = ensure_context();
+  TORCH_CHECK(
+      dst_rank >= 0 && dst_rank < static_cast<int64_t>(context->getSize()),
+      "dst_rank out of range: ", dst_rank, " (world_size=", context->getSize(),
+      ")");
+
+  auto op_type = parse_reduce_op(reduce_op);
+  auto dtype =
+      torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
+
+  std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
+  int64_t handle = static_cast<int64_t>(wsi_cache_.size());
+  wsi_cache_.push_back(
+      CachedPlan{PlanKind::Reduce, dtype, dst_rank, op_type, nullptr, 0});
+
+  // Look up plan and create WSI
+  std::lock_guard<std::mutex> cache_lock(wsi_cache_mutex_);
+  TORCH_CHECK(
+      plan_handle >= 0 && plan_handle < static_cast<int64_t>(wsi_cache_.size()),
+      "reduce_run: invalid plan_handle=", plan_handle);
+  auto& plan = wsi_cache_[static_cast<size_t>(plan_handle)];
+
+  int64_t num_elems = compute_device_elems(input);
+  ensure_wsi(plan, num_elems, context);
+
+  DEBUGINFO("reduce_plan: stored params at handle=", handle);
+  return handle;
+}
+
+// ============================================================================
+// Runtime run ops
+// ============================================================================
+
+at::Tensor spyre_broadcast_run_impl(const at::Tensor& input,
+                                    int64_t plan_handle, int64_t src_rank) {
+  DEBUGINFO("spyre::broadcast_run called with plan_handle=", plan_handle,
+            ", src_rank=", src_rank);
+
+  drain_pending_work();
+
+  auto context = ensure_context();
 
   // Create output tensor
   at::Tensor output = at::empty_like(input);
@@ -345,16 +368,6 @@ at::Tensor spyre_allreduce_run_impl(const at::Tensor& input,
   TORCH_CHECK(input.nbytes() > 0,
               "Tensor must have non-zero size for all_reduce");
 
-  // Look up plan and create WSI
-  std::lock_guard<std::mutex> cache_lock(wsi_cache_mutex_);
-  TORCH_CHECK(
-      plan_handle >= 0 && plan_handle < static_cast<int64_t>(wsi_cache_.size()),
-      "allreduce_run: invalid plan_handle=", plan_handle);
-  auto& plan = wsi_cache_[static_cast<size_t>(plan_handle)];
-
-  int64_t num_elems = compute_device_elems(input);
-  ensure_wsi(plan, num_elems, context);
-
   // Get SharedOwnerCtx
   auto* ctx = static_cast<spyre::SharedOwnerCtx*>(
       input.storage().data_ptr().get_context());
@@ -398,16 +411,6 @@ at::Tensor spyre_reduce_run_impl(const at::Tensor& input, int64_t plan_handle,
   TORCH_CHECK(input.is_contiguous(), "Tensor must be contiguous for reduce");
   TORCH_CHECK(input.nbytes() > 0, "Tensor must have non-zero size for reduce");
 
-  // Look up plan and create WSI
-  std::lock_guard<std::mutex> cache_lock(wsi_cache_mutex_);
-  TORCH_CHECK(
-      plan_handle >= 0 && plan_handle < static_cast<int64_t>(wsi_cache_.size()),
-      "reduce_run: invalid plan_handle=", plan_handle);
-  auto& plan = wsi_cache_[static_cast<size_t>(plan_handle)];
-
-  int64_t num_elems = compute_device_elems(input);
-  ensure_wsi(plan, num_elems, context);
-
   // Get SharedOwnerCtx
   auto* ctx = static_cast<spyre::SharedOwnerCtx*>(
       input.storage().data_ptr().get_context());
@@ -438,7 +441,7 @@ at::Tensor spyre_reduce_run_impl(const at::Tensor& input, int64_t plan_handle,
 }
 
 // ============================================================================
-// Legacy async ops — used by the eager/interpreted path.
+// Legacy async ops — used by the interpreted path.
 // ============================================================================
 
 // Async broadcast implementation - returns immediately
