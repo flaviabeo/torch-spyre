@@ -1989,6 +1989,32 @@ def lower_c10d_all_gather_async(tensor, group_size, group_name):
     )
 
 
+@register_spyre_lowering(
+    torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default
+)
+def lower_c10d_all_gather_coalesced(tensors, group_size, group_name):
+    """Decompose coalesced all_gather into per-tensor all_gather calls.
+
+    spyre-comms only supports single-tensor allgather WSIs, so we lower each
+    tensor in the list independently.  The C++ wsi_cache_ deduplicates plans
+    for same-shaped tensors automatically.
+    """
+    results = []
+    for tensor in tensors:
+        tensor.realize()
+        results.append(
+            ir.TensorBox.create(
+                AllGatherAsyncFallback(
+                    torch.ops.spyre.all_gather_async.default,
+                    tensor,
+                    group_size,
+                    group_name,
+                )
+            )
+        )
+    return results
+
+
 @register_spyre_lowering(torch.ops._c10d_functional.all_reduce.default)
 def lower_c10d_all_reduce_async(tensor, reduce_op, group_name):
     """
@@ -2038,3 +2064,46 @@ def lower_c10d_all_reduce_inplace(tensor, reduce_op, group_name):
             group_name,
         )
     )
+
+
+@register_spyre_lowering(torch.ops._c10d_functional.all_reduce_coalesced.default)
+def lower_c10d_all_reduce_coalesced(tensors, reduce_op, group_name):
+    """Decompose coalesced all_reduce into per-tensor all_reduce calls.
+
+    spyre-comms only supports single-tensor allreduce WSIs, so we lower each
+    tensor in the list independently.  The C++ wsi_cache_ deduplicates plans
+    for same-shaped tensors automatically.
+    """
+    results = []
+    for tensor in tensors:
+        tensor.realize()
+        results.append(
+            ir.TensorBox.create(
+                AllReduceAsyncFallback(
+                    torch.ops.spyre.all_reduce_async.default,
+                    tensor,
+                    reduce_op,
+                    group_name,
+                )
+            )
+        )
+    return results
+
+
+@register_spyre_lowering(torch.ops._c10d_functional.all_reduce_coalesced_.default)
+def lower_c10d_all_reduce_coalesced_inplace(tensors, reduce_op, group_name):
+    """In-place variant of the coalesced all_reduce decomposition."""
+    results = []
+    for tensor in tensors:
+        tensor.realize()
+        results.append(
+            ir.TensorBox.create(
+                AllReduceAsyncFallback(
+                    torch.ops._c10d_functional.all_reduce_.default,
+                    tensor,
+                    reduce_op,
+                    group_name,
+                )
+            )
+        )
+    return results
