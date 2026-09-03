@@ -37,7 +37,7 @@
 
 namespace spyre {
 
-enum class CollectiveKind { Broadcast, AllGather, AllReduce };
+enum class CollectiveKind { Broadcast, AllGather, AllReduce, ReduceScatter };
 
 // Structure to hold pending async work
 struct PendingWork {
@@ -87,7 +87,7 @@ static void check_collective_errors(spyre_comms::WorkSchedule& work) {
 }
 
 // Compile-time plan cache.
-enum class PlanKind { Broadcast, AllReduce, AllGather };
+enum class PlanKind { Broadcast, AllReduce, AllGather, ReduceScatter };
 
 struct CachedPlan {
   PlanKind kind;
@@ -99,9 +99,11 @@ struct CachedPlan {
   // tensor_info MUST outlive wsi — spyre_comms stores a non-owning reference
   // to it inside the WorkScheduleInfo's sentinel envelope.
   std::unique_ptr<spyre_comms::TensorInfo> tensor_info;
+  std::unique_ptr<spyre_comms::TensorInfo>
+      output_tensor_info;  // reduce_scatter
   std::unique_ptr<spyre_comms::WorkScheduleInfo> wsi;
   int64_t num_elems = 0;
-  int64_t group_size = 0;  // allgather only
+  int64_t group_size = 0;  // allgather / reduce_scatter
 };
 static std::vector<CachedPlan> wsi_cache_;
 static std::mutex wsi_cache_mutex_;
@@ -214,6 +216,15 @@ void ensure_wsi(CachedPlan& plan, int64_t num_elems,
       plan.wsi = context->allgather(output_infos, *plan.tensor_info);
       break;
     }
+    case PlanKind::ReduceScatter: {
+      int64_t out_elems = num_elems / plan.group_size;
+      spyre_comms::TensorShape out_shape({out_elems});
+      plan.output_tensor_info =
+          std::make_unique<spyre_comms::TensorInfo>(plan.dtype, out_shape);
+      plan.wsi = context->reduce_scatter(
+          *plan.tensor_info, *plan.output_tensor_info, plan.reduce_op);
+      break;
+    }
   }
   TORCH_CHECK(plan.wsi != nullptr, "Failed to create WSI");
 }
@@ -246,7 +257,7 @@ int64_t spyre_broadcast_plan_impl(int64_t num_elems, int64_t dtype_code,
   handle = static_cast<int64_t>(wsi_cache_.size());
   wsi_cache_.push_back(CachedPlan{PlanKind::Broadcast, dtype, src_rank,
                                   spyre_comms::SpyreReductionOpType::SUM,
-                                  nullptr, nullptr, 0, 0});
+                                  nullptr, nullptr, nullptr, 0, 0});
   auto& plan = wsi_cache_.back();
   ensure_wsi(plan, num_elems, context);
 
@@ -276,7 +287,7 @@ int64_t spyre_allreduce_plan_impl(int64_t num_elems, int64_t dtype_code,
 
   handle = static_cast<int64_t>(wsi_cache_.size());
   wsi_cache_.push_back(CachedPlan{PlanKind::AllReduce, dtype, 0, op_type,
-                                  nullptr, nullptr, 0, 0});
+                                  nullptr, nullptr, nullptr, 0, 0});
   auto& plan = wsi_cache_.back();
   ensure_wsi(plan, num_elems, context);
 
@@ -313,7 +324,7 @@ int64_t spyre_allgather_plan_impl(int64_t num_elems, int64_t dtype_code,
   handle = static_cast<int64_t>(wsi_cache_.size());
   wsi_cache_.push_back(CachedPlan{PlanKind::AllGather, dtype, 0,
                                   spyre_comms::SpyreReductionOpType::SUM,
-                                  nullptr, nullptr, 0, group_size});
+                                  nullptr, nullptr, nullptr, 0, group_size});
   auto& plan = wsi_cache_.back();
   ensure_wsi(plan, num_elems, context);
 
@@ -359,6 +370,46 @@ int64_t spyre_reducescatter_plan_impl(int64_t num_elems, int64_t dtype_code,
   ensure_wsi(plan, num_elems, context);
 
   SPYRE_RUNTIME_DEBUG() << "created WSI at handle=" << handle;
+  return handle;
+}
+
+int64_t spyre_reducescatter_plan_impl(int64_t num_elems, int64_t dtype_code,
+                                      int64_t group_size,
+                                      const std::string& reduce_op,
+                                      const std::string& group_name) {
+  DEBUGINFO("spyre::reducescatter_plan called with num_elems=", num_elems,
+            ", dtype=", dtype_code, ", group_size=", group_size,
+            ", reduce_op=", reduce_op);
+
+  auto context = ensure_context();
+  auto op_type = parse_reduce_op(reduce_op);
+
+  TORCH_CHECK(
+      group_size > 0 && group_size == static_cast<int64_t>(context->getSize()),
+      "group_size must equal world size: got ", group_size, " (world size is ",
+      context->getSize(), ")");
+  TORCH_CHECK(num_elems % group_size == 0,
+              "num_elems must be divisible by group_size: ", num_elems, " % ",
+              group_size, " != 0");
+
+  auto dtype =
+      torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
+
+  std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
+  int64_t handle = cache_lookup(PlanKind::ReduceScatter, dtype, num_elems, 0,
+                                op_type, group_size);
+  if (handle >= 0) {
+    DEBUGINFO("reducescatter_plan: cache hit at handle=", handle);
+    return handle;
+  }
+
+  handle = static_cast<int64_t>(wsi_cache_.size());
+  wsi_cache_.push_back(CachedPlan{PlanKind::ReduceScatter, dtype, 0, op_type,
+                                  nullptr, nullptr, nullptr, 0, group_size});
+  auto& plan = wsi_cache_.back();
+  ensure_wsi(plan, num_elems, context);
+
+  DEBUGINFO("reducescatter_plan: created WSI at handle=", handle);
   return handle;
 }
 
@@ -648,7 +699,8 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
     TORCH_CHECK(it != pending_work_map_.end(),
                 "No pending async work found for tensor. "
                 "wait_work must be called on a tensor returned from "
-                "broadcast_run, allgather_run, or allreduce_run.");
+                "broadcast_run, allgather_run, allreduce_run, or "
+                "reducescatter_run.");
 
     pending = std::move(it->second);
     pending_work_map_.erase(it);
@@ -728,6 +780,9 @@ TORCH_LIBRARY(spyre, m) {
   m.def(
       "all_reduce_async(Tensor(a!) input, str reduce_op=\"sum\", "
       "str group_name=\"default\") -> Tensor(a)");
+  m.def(
+      "reduce_scatter_async(Tensor input, str reduce_op=\"sum\", "
+      "int group_size=1, str group_name=\"default\") -> Tensor");
   m.def("wait_work(Tensor(a!) tensor) -> Tensor(a)");
 
   // Compile-time plan ops — scalar-only, registered with impl directly
@@ -744,6 +799,10 @@ TORCH_LIBRARY(spyre, m) {
       "allgather_plan(int num_elems, int dtype, int group_size, "
       "str group_name) -> int",
       &spyre::spyre_allgather_plan_impl);
+  m.def(
+      "reducescatter_plan(int num_elems, int dtype, int group_size, "
+      "str reduce_op, str group_name) -> int",
+      &spyre::spyre_reducescatter_plan_impl);
 
   // Runtime run ops — bind cached WSI to a tensor and execute
   m.def(
@@ -752,6 +811,9 @@ TORCH_LIBRARY(spyre, m) {
   m.def("allreduce_run(Tensor(a!) input, int plan_handle) -> Tensor(a)");
   m.def(
       "allgather_run(Tensor input, int plan_handle, int group_size) "
+      "-> Tensor");
+  m.def(
+      "reducescatter_run(Tensor input, int plan_handle, int group_size) "
       "-> Tensor");
 }
 
@@ -762,4 +824,5 @@ TORCH_LIBRARY_IMPL(spyre, PrivateUse1, m) {
   m.impl("broadcast_run", &spyre::spyre_broadcast_run_impl);
   m.impl("allreduce_run", &spyre::spyre_allreduce_run_impl);
   m.impl("allgather_run", &spyre::spyre_allgather_run_impl);
+  m.impl("reducescatter_run", &spyre::spyre_reducescatter_run_impl);
 }
