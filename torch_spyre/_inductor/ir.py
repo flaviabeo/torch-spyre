@@ -491,6 +491,20 @@ def _compute_device_num_elems(layout: "FixedLayout") -> int:
     return int(V.graph.sizevars.guarding_hint_or_throw(numel))
 
 
+def _next_instance_id(wrapper: PythonWrapperCodegen) -> int:
+    """Return a monotonically increasing ID unique per wrapper instance.
+
+    Each collective op in a compiled graph gets its own instance_id so the
+    C++ WSI plan cache never conflates two distinct ops that happen to share
+    the same (kind, dtype, num_elems, …) parameters.
+    """
+    if not hasattr(wrapper, "_next_plan_instance_id"):
+        wrapper._next_plan_instance_id = 0
+    iid = wrapper._next_plan_instance_id
+    wrapper._next_plan_instance_id += 1
+    return iid
+
+
 class BroadcastAsyncFallback(ir.ExternKernel):
     """IR node for spyre.broadcast_async — emits a runtime call to async broadcast.
 
@@ -508,12 +522,14 @@ class BroadcastAsyncFallback(ir.ExternKernel):
         input_layout = input_tensor.get_layout()
         dtype_code = _dtype_to_int(input_layout.dtype)
         num_elems = _compute_device_num_elems(input_layout)
+        instance_id = _next_instance_id(wrapper)
 
         # Emit plan call in header (module-level, runs once at graph load)
         plan_var = f"_bcast_plan_{output_name}"
         plan_line = (
             f"{plan_var} = torch.ops.spyre.broadcast_plan("
-            f"{num_elems}, {dtype_code}, {src_rank}, '{group_name}')"
+            f"{num_elems}, {dtype_code}, {src_rank}, '{group_name}', "
+            f"{instance_id})"
         )
         if not hasattr(wrapper, "_emitted_plans"):
             wrapper._emitted_plans = set()
@@ -585,12 +601,14 @@ class AllGatherAsyncFallback(ir.ExternKernel):
         input_layout = input_tensor.get_layout()
         dtype_code = _dtype_to_int(input_layout.dtype)
         num_elems = _compute_device_num_elems(input_layout)
+        instance_id = _next_instance_id(wrapper)
 
         # Emit plan call in header (module-level, runs once at graph load)
         plan_var = f"_ag_plan_{output_name}"
         plan_line = (
             f"{plan_var} = torch.ops.spyre.allgather_plan("
-            f"{num_elems}, {dtype_code}, {group_size}, '{group_name}')"
+            f"{num_elems}, {dtype_code}, {group_size}, '{group_name}', "
+            f"{instance_id})"
         )
         if not hasattr(wrapper, "_emitted_plans"):
             wrapper._emitted_plans = set()
@@ -665,12 +683,14 @@ class AllReduceAsyncFallback(ir.ExternKernel):
         input_layout = input_tensor.get_layout()
         dtype_code = _dtype_to_int(input_layout.dtype)
         num_elems = _compute_device_num_elems(input_layout)
+        instance_id = _next_instance_id(wrapper)
 
         # Emit plan call in header
         plan_var = f"_ar_plan_{output_name}"
         plan_line = (
             f"{plan_var} = torch.ops.spyre.allreduce_plan("
-            f"{num_elems}, {dtype_code}, '{reduce_op}', '{group_name}')"
+            f"{num_elems}, {dtype_code}, '{reduce_op}', '{group_name}', "
+            f"{instance_id})"
         )
         if not hasattr(wrapper, "_emitted_plans"):
             wrapper._emitted_plans = set()

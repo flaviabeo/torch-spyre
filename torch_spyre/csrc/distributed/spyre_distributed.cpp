@@ -71,6 +71,7 @@ struct CachedPlan {
   std::unique_ptr<spyre_comms::WorkScheduleInfo> wsi;
   int64_t num_elems = 0;
   int64_t group_size = 0;  // allgather only
+  int64_t instance_id = 0;
 };
 static std::vector<CachedPlan> wsi_cache_;
 static std::mutex wsi_cache_mutex_;
@@ -137,12 +138,13 @@ spyre_comms::SpyreReductionOpType parse_reduce_op(
 int64_t cache_lookup(PlanKind kind, spyre_comms::TensorDataTypeEnum dtype,
                      int64_t num_elems, int64_t rank_param,
                      spyre_comms::SpyreReductionOpType reduce_op,
-                     int64_t group_size) {
+                     int64_t group_size, int64_t instance_id) {
   for (size_t i = 0; i < wsi_cache_.size(); i++) {
     auto& entry = wsi_cache_[i];
     if (entry.kind == kind && entry.dtype == dtype &&
         entry.num_elems == num_elems && entry.rank_param == rank_param &&
-        entry.reduce_op == reduce_op && entry.group_size == group_size) {
+        entry.reduce_op == reduce_op && entry.group_size == group_size &&
+        entry.instance_id == instance_id) {
       return static_cast<int64_t>(i);
     }
   }
@@ -181,9 +183,11 @@ void ensure_wsi(CachedPlan& plan, int64_t num_elems,
 
 int64_t spyre_broadcast_plan_impl(int64_t num_elems, int64_t dtype_code,
                                   int64_t src_rank,
-                                  const std::string& group_name) {
+                                  const std::string& group_name,
+                                  int64_t instance_id) {
   DEBUGINFO("spyre::broadcast_plan called with num_elems=", num_elems,
-            ", dtype=", dtype_code, ", src_rank=", src_rank);
+            ", dtype=", dtype_code, ", src_rank=", src_rank,
+            ", instance_id=", instance_id);
 
   auto context = ensure_context();
 
@@ -196,8 +200,9 @@ int64_t spyre_broadcast_plan_impl(int64_t num_elems, int64_t dtype_code,
       torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
 
   std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
-  int64_t handle = cache_lookup(PlanKind::Broadcast, dtype, num_elems, src_rank,
-                                spyre_comms::SpyreReductionOpType::SUM, 0);
+  int64_t handle =
+      cache_lookup(PlanKind::Broadcast, dtype, num_elems, src_rank,
+                   spyre_comms::SpyreReductionOpType::SUM, 0, instance_id);
   if (handle >= 0) {
     DEBUGINFO("broadcast_plan: cache hit at handle=", handle);
     return handle;
@@ -206,7 +211,7 @@ int64_t spyre_broadcast_plan_impl(int64_t num_elems, int64_t dtype_code,
   handle = static_cast<int64_t>(wsi_cache_.size());
   wsi_cache_.push_back(CachedPlan{PlanKind::Broadcast, dtype, src_rank,
                                   spyre_comms::SpyreReductionOpType::SUM,
-                                  nullptr, nullptr, 0, 0});
+                                  nullptr, nullptr, 0, 0, instance_id});
   auto& plan = wsi_cache_.back();
   ensure_wsi(plan, num_elems, context);
 
@@ -216,9 +221,11 @@ int64_t spyre_broadcast_plan_impl(int64_t num_elems, int64_t dtype_code,
 
 int64_t spyre_allreduce_plan_impl(int64_t num_elems, int64_t dtype_code,
                                   const std::string& reduce_op,
-                                  const std::string& group_name) {
+                                  const std::string& group_name,
+                                  int64_t instance_id) {
   DEBUGINFO("spyre::allreduce_plan called with num_elems=", num_elems,
-            ", dtype=", dtype_code, ", reduce_op=", reduce_op);
+            ", dtype=", dtype_code, ", reduce_op=", reduce_op,
+            ", instance_id=", instance_id);
 
   auto context = ensure_context();
   auto op_type = parse_reduce_op(reduce_op);
@@ -226,8 +233,8 @@ int64_t spyre_allreduce_plan_impl(int64_t num_elems, int64_t dtype_code,
       torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
 
   std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
-  int64_t handle =
-      cache_lookup(PlanKind::AllReduce, dtype, num_elems, 0, op_type, 0);
+  int64_t handle = cache_lookup(PlanKind::AllReduce, dtype, num_elems, 0,
+                                op_type, 0, instance_id);
   if (handle >= 0) {
     DEBUGINFO("allreduce_plan: cache hit at handle=", handle);
     return handle;
@@ -235,7 +242,7 @@ int64_t spyre_allreduce_plan_impl(int64_t num_elems, int64_t dtype_code,
 
   handle = static_cast<int64_t>(wsi_cache_.size());
   wsi_cache_.push_back(CachedPlan{PlanKind::AllReduce, dtype, 0, op_type,
-                                  nullptr, nullptr, 0, 0});
+                                  nullptr, nullptr, 0, 0, instance_id});
   auto& plan = wsi_cache_.back();
   ensure_wsi(plan, num_elems, context);
 
@@ -245,9 +252,11 @@ int64_t spyre_allreduce_plan_impl(int64_t num_elems, int64_t dtype_code,
 
 int64_t spyre_allgather_plan_impl(int64_t num_elems, int64_t dtype_code,
                                   int64_t group_size,
-                                  const std::string& group_name) {
+                                  const std::string& group_name,
+                                  int64_t instance_id) {
   DEBUGINFO("spyre::allgather_plan called with num_elems=", num_elems,
-            ", dtype=", dtype_code, ", group_size=", group_size);
+            ", dtype=", dtype_code, ", group_size=", group_size,
+            ", instance_id=", instance_id);
 
   auto context = ensure_context();
 
@@ -260,18 +269,18 @@ int64_t spyre_allgather_plan_impl(int64_t num_elems, int64_t dtype_code,
       torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
 
   std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
-  int64_t handle =
-      cache_lookup(PlanKind::AllGather, dtype, num_elems, 0,
-                   spyre_comms::SpyreReductionOpType::SUM, group_size);
+  int64_t handle = cache_lookup(PlanKind::AllGather, dtype, num_elems, 0,
+                                spyre_comms::SpyreReductionOpType::SUM,
+                                group_size, instance_id);
   if (handle >= 0) {
     DEBUGINFO("allgather_plan: cache hit at handle=", handle);
     return handle;
   }
 
   handle = static_cast<int64_t>(wsi_cache_.size());
-  wsi_cache_.push_back(CachedPlan{PlanKind::AllGather, dtype, 0,
-                                  spyre_comms::SpyreReductionOpType::SUM,
-                                  nullptr, nullptr, 0, group_size});
+  wsi_cache_.push_back(CachedPlan{
+      PlanKind::AllGather, dtype, 0, spyre_comms::SpyreReductionOpType::SUM,
+      nullptr, nullptr, 0, group_size, instance_id});
   auto& plan = wsi_cache_.back();
   ensure_wsi(plan, num_elems, context);
 
@@ -534,15 +543,15 @@ TORCH_LIBRARY(spyre, m) {
   // so they dispatch via CompositeImplicitAutograd (no tensor to key off).
   m.def(
       "broadcast_plan(int num_elems, int dtype, int src_rank, "
-      "str group_name) -> int",
+      "str group_name, int instance_id) -> int",
       &spyre::spyre_broadcast_plan_impl);
   m.def(
       "allreduce_plan(int num_elems, int dtype, str reduce_op, "
-      "str group_name) -> int",
+      "str group_name, int instance_id) -> int",
       &spyre::spyre_allreduce_plan_impl);
   m.def(
       "allgather_plan(int num_elems, int dtype, int group_size, "
-      "str group_name) -> int",
+      "str group_name, int instance_id) -> int",
       &spyre::spyre_allgather_plan_impl);
 
   // Runtime run ops — bind cached WSI to a tensor and execute
