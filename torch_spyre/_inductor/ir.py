@@ -757,13 +757,11 @@ class WaitWorkFallback(ir.ExternKernel):
         return OrderedSet([self.inputs[0].get_name()])
 
     def get_read_writes(self) -> dependencies.ReadWrites:
-        reads = OrderedSet(
-            [dependencies.StarDep(name=self.inputs[0].get_name())]
+        reads = OrderedSet([dependencies.StarDep(name=self.inputs[0].get_name())])
+        writes = OrderedSet([dependencies.StarDep(name=self.get_name())])
+        return dependencies.ReadWrites(
+            reads=reads, writes=writes, index_exprs=OrderedSet()
         )
-        writes = OrderedSet(
-            [dependencies.StarDep(name=self.get_name())]
-        )
-        return dependencies.ReadWrites(reads=reads, writes=writes, index_exprs=OrderedSet())
 
     def get_mutation_names(self) -> Sequence[str]:
         return [self.inputs[0].get_name()]

@@ -497,8 +497,8 @@ at::Tensor spyre_wait_work_impl(const at::Tensor& tensor) {
     combined->start();
     combined->wait();
     combined->reset();
-    SPYRE_RUNTIME_DEBUG() << "Broadcast batch executed: combined "
-                          << batch_size << " schedules";
+    SPYRE_RUNTIME_DEBUG() << "Broadcast batch executed: combined " << batch_size
+                          << " schedules";
   }
 
   // Get SharedOwnerCtx for map lookup
