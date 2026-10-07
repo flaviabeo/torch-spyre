@@ -29,6 +29,9 @@ from torch_spyre import _C
 from .constants import IDENTITY_OP
 
 
+LX_RELAYOUT_INFO_KEY = "lx_relayout_certified"
+
+
 class IndirectAccess(Function):
     """Sympy function: IndirectAccess(tensor_name) — runtime index read from that tensor at the current iteration point.
 
@@ -261,6 +264,10 @@ class TensorArg:
             ops without loop_info/coarse tiling.
         work_division: Optional tensor-specific ownership used when it differs
             from the operation's work division.
+        kernel_local: True when nothing outside the kernel that produced this
+            buffer reads it. The KTIR plan-time fuser deletes a producer op only
+            for such a buffer; only the scheduler can see a buffer's users, so
+            it is filled there and defaults to False.
     """
 
     is_input: bool
@@ -275,21 +282,28 @@ class TensorArg:
         default_factory=lambda: ElementArrangement.STANDARD
     )
     work_division: TensorWorkDivision | None = None
+    kernel_local: bool = False
 
 
-def is_lx_relayout_identity(op: str, args: Sequence[TensorArg]) -> bool:
-    """An LX identity whose input and output have different owners."""
+def is_lx_relayout_identity(
+    op: str,
+    args: Sequence[TensorArg],
+    op_info: dict[str, Any] | None = None,
+) -> bool:
+    """A planner-certified LX identity moving between different owners."""
 
-    if op != IDENTITY_OP or len(args) != 2:
+    if not op_info or not op_info.get(LX_RELAYOUT_INFO_KEY):
         return False
+    if op != IDENTITY_OP or len(args) != 2:
+        raise ValueError("certified LX relayout must be a two-argument identity")
     source, destination = args
-    return (
-        "lx" in source.allocation
-        and "lx" in destination.allocation
-        and source.work_division is not None
-        and destination.work_division is not None
-        and not source.work_division.same_ownership(destination.work_division)
-    )
+    if "lx" not in source.allocation or "lx" not in destination.allocation:
+        raise ValueError("certified LX relayout lost an LX allocation")
+    if source.work_division is None or destination.work_division is None:
+        raise ValueError("certified LX relayout lost a tensor work division")
+    if source.work_division.same_ownership(destination.work_division):
+        raise ValueError("certified LX relayout ownership collapsed")
+    return True
 
 
 @dataclasses.dataclass
@@ -355,6 +369,9 @@ class OpSpec:
     # node exposes no data.ranges.
     node_output_ranges: tuple[Expr, ...] | None = None
     debug_handle: DebugHandle | None = None
+    # Producer cores holding finished reduction values. Other producer cores
+    # must not be exposed as holders to the ordinary LX copy machinery.
+    completed_producer_cores: tuple[int, ...] = ()
 
 
 # --- Module-level constant tensor cache --------------------------------------
