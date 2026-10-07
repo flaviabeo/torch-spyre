@@ -321,6 +321,47 @@ int64_t spyre_allgather_plan_impl(int64_t num_elems, int64_t dtype_code,
   return handle;
 }
 
+int64_t spyre_reducescatter_plan_impl(int64_t num_elems, int64_t dtype_code,
+                                      int64_t group_size,
+                                      const std::string& reduce_op,
+                                      const std::string& group_name) {
+  SPYRE_RUNTIME_DEBUG() << "called with num_elems=" << num_elems
+                        << ", dtype=" << dtype_code
+                        << ", group_size=" << group_size
+                        << ", reduce_op=" << reduce_op;
+
+  auto context = ensure_context();
+  auto op_type = parse_reduce_op(reduce_op);
+
+  TORCH_CHECK(
+      group_size > 0 && group_size == static_cast<int64_t>(context->getSize()),
+      "group_size must equal world size: got ", group_size, " (world size is ",
+      context->getSize(), ")");
+  TORCH_CHECK(num_elems % group_size == 0,
+              "num_elems must be divisible by group_size: ", num_elems, " % ",
+              group_size, " != 0");
+
+  auto dtype =
+      torch_dtype_to_spyre_comms(static_cast<c10::ScalarType>(dtype_code));
+
+  std::lock_guard<std::mutex> lock(wsi_cache_mutex_);
+  int64_t handle = cache_lookup(PlanKind::ReduceScatter, dtype, num_elems, 0,
+                                op_type, group_size);
+  if (handle >= 0) {
+    SPYRE_RUNTIME_DEBUG() << "cache hit at handle=" << handle;
+    return handle;
+  }
+
+  handle = static_cast<int64_t>(wsi_cache_.size());
+  wsi_cache_.push_back(CachedPlan{PlanKind::ReduceScatter, dtype, 0, op_type,
+                                  nullptr, nullptr, nullptr, 0, group_size});
+  auto& plan = wsi_cache_.back();
+  ensure_wsi(plan, num_elems, context);
+
+  SPYRE_RUNTIME_DEBUG() << "created WSI at handle=" << handle;
+  return handle;
+}
+
 // ============================================================================
 // Runtime run ops
 // ============================================================================
@@ -513,8 +554,79 @@ at::Tensor spyre_allgather_run_impl(const at::Tensor& input,
                                                       std::move(work_schedule),
                                                       std::move(rank_outputs),
                                                       input.size(0),
-                                                      {output},
-                                                      std::move(ka)});
+                                                      {output}});
+  }
+
+  return output;
+}
+
+at::Tensor spyre_reducescatter_run_impl(const at::Tensor& input,
+                                        int64_t plan_handle,
+                                        int64_t group_size) {
+  SPYRE_RUNTIME_DEBUG() << "called with plan_handle=" << plan_handle
+                        << ", group_size=" << group_size;
+
+  auto context = ensure_context();
+
+  std::lock_guard<std::mutex> cache_lock(wsi_cache_mutex_);
+  TORCH_CHECK(
+      plan_handle >= 0 && plan_handle < static_cast<int64_t>(wsi_cache_.size()),
+      "reducescatter_run: invalid plan_handle=", plan_handle);
+  auto& plan = wsi_cache_[static_cast<size_t>(plan_handle)];
+
+  TORCH_CHECK(input.is_privateuseone(),
+              "Tensor must be on Spyre device for reduce_scatter");
+  TORCH_CHECK(input.is_contiguous(),
+              "Tensor must be contiguous for reduce_scatter");
+  TORCH_CHECK(input.nbytes() > 0,
+              "Tensor must have non-zero size for reduce_scatter");
+
+  // Get SharedOwnerCtx for input
+  auto* input_ctx = static_cast<spyre::SharedOwnerCtx*>(
+      input.storage().data_ptr().get_context());
+  TORCH_CHECK(input_ctx != nullptr, "SharedOwnerCtx is null for input tensor");
+
+  spyre_comms::Tensor input_tensor(*plan.tensor_info,
+                                   input.storage().data_ptr().get());
+  input_tensor.SetSpyreDeviceAddressBorrowed(&input_ctx->composite_addr);
+
+  // Allocate output tensor with reduced size
+  auto output_sizes = input.sizes().vec();
+  TORCH_CHECK(output_sizes[0] % group_size == 0,
+              "reduce_scatter: input dim 0 (", output_sizes[0],
+              ") must be divisible by group_size (", group_size, ")");
+  output_sizes[0] /= group_size;
+  at::Tensor output = at::empty(output_sizes, input.options());
+
+  auto* output_ctx = static_cast<spyre::SharedOwnerCtx*>(
+      output.storage().data_ptr().get_context());
+  TORCH_CHECK(output_ctx != nullptr,
+              "SharedOwnerCtx is null for output tensor");
+
+  spyre_comms::Tensor output_tensor(*plan.output_tensor_info,
+                                    output.storage().data_ptr().get());
+  output_tensor.SetSpyreDeviceAddressBorrowed(&output_ctx->composite_addr);
+
+  auto work_schedule = context->reduce_scatter_applyTensors(
+      *plan.wsi, input_tensor, output_tensor);
+  TORCH_CHECK(
+      work_schedule != nullptr,
+      "reduce_scatter_applyTensors operation failed to create WorkSchedule");
+
+  work_schedule->start();
+
+  // Store pending work
+  {
+    std::lock_guard<std::mutex> lock(work_map_mutex_);
+    TORCH_CHECK(pending_work_map_.find(output_ctx) == pending_work_map_.end(),
+                "reducescatter_run called twice on the same allocation without "
+                "intervening wait_work");
+    pending_work_map_.emplace(output_ctx,
+                              PendingWork{CollectiveKind::ReduceScatter,
+                                          std::move(work_schedule),
+                                          {},
+                                          0,
+                                          {output, input}});
   }
 
   return output;
