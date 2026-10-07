@@ -297,9 +297,10 @@ int64_t spyre_reducescatter_plan_impl(int64_t num_elems, int64_t dtype_code,
                                       int64_t group_size,
                                       const std::string& reduce_op,
                                       const std::string& group_name) {
-  DEBUGINFO("spyre::reducescatter_plan called with num_elems=", num_elems,
-            ", dtype=", dtype_code, ", group_size=", group_size,
-            ", reduce_op=", reduce_op);
+  SPYRE_RUNTIME_DEBUG() << "called with num_elems=" << num_elems
+                        << ", dtype=" << dtype_code
+                        << ", group_size=" << group_size
+                        << ", reduce_op=" << reduce_op;
 
   auto context = ensure_context();
   auto op_type = parse_reduce_op(reduce_op);
@@ -319,7 +320,7 @@ int64_t spyre_reducescatter_plan_impl(int64_t num_elems, int64_t dtype_code,
   int64_t handle = cache_lookup(PlanKind::ReduceScatter, dtype, num_elems, 0,
                                 op_type, group_size);
   if (handle >= 0) {
-    DEBUGINFO("reducescatter_plan: cache hit at handle=", handle);
+    SPYRE_RUNTIME_DEBUG() << "cache hit at handle=" << handle;
     return handle;
   }
 
@@ -329,7 +330,7 @@ int64_t spyre_reducescatter_plan_impl(int64_t num_elems, int64_t dtype_code,
   auto& plan = wsi_cache_.back();
   ensure_wsi(plan, num_elems, context);
 
-  DEBUGINFO("reducescatter_plan: created WSI at handle=", handle);
+  SPYRE_RUNTIME_DEBUG() << "created WSI at handle=" << handle;
   return handle;
 }
 
@@ -516,8 +517,8 @@ at::Tensor spyre_allgather_run_impl(const at::Tensor& input,
 at::Tensor spyre_reducescatter_run_impl(const at::Tensor& input,
                                         int64_t plan_handle,
                                         int64_t group_size) {
-  DEBUGINFO("spyre::reducescatter_run called with plan_handle=", plan_handle,
-            ", group_size=", group_size);
+  SPYRE_RUNTIME_DEBUG() << "called with plan_handle=" << plan_handle
+                        << ", group_size=" << group_size;
 
   auto context = ensure_context();
 
