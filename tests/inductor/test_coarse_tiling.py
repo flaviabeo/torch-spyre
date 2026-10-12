@@ -11477,7 +11477,9 @@ class TestDrainPlanPushAndLifetime(unittest.TestCase):
 
         allocator = CoOptimizingAllocator(MagicMock(), size=4096)
         allocator._validated_drain_plans = {
-            "carry": SimpleNamespace(storage_name="carry", collective=None)
+            "carry": SimpleNamespace(
+                storage_name="carry", collective=None, drained_users=()
+            )
         }
         divisions = {op.name: [CoreDivision(splits={})] for op in ops}
         with (
@@ -11703,12 +11705,14 @@ class TestDrainPlanPushAndLifetime(unittest.TestCase):
 
 
 class TestDrainedCollective(unittest.TestCase):
-    """A loop carry whose only post-loop use is a collective, drained for it.
+    """A loop carry reduced by a post-loop in-place collective, drained for it.
 
-    The plan accepts only the shape the push can rewrite -- one collective
-    reading the storage directly, after the whole loop -- and the rewrite moves
-    only that collective onto the drain.  The solve around it is exercised in
-    ``test_work_division.py``.
+    The in-place all_reduce leaves its result in its operand, so the carry's
+    post-loop accesses are the collective, its wait and the readers of the
+    result.  The plan accepts only the chain the push can rewrite -- that
+    collective reading the storage directly after the whole loop, its wait,
+    then rewritable loops -- and the rewrite moves every one of them onto the
+    drain.  The solve around it is exercised in ``test_work_division.py``.
     """
 
     @staticmethod
@@ -11727,56 +11731,109 @@ class TestDrainedCollective(unittest.TestCase):
         return buf
 
     @staticmethod
-    def _collective(operand, cls=None, name="all_reduce"):
-        from torch_spyre._inductor.ir import AllReduceAsyncFallback
+    def _extern(cls, operand, name, mutated=None):
+        """A ``create_inplace``/``create_wait``-shaped kernel mutating its operand."""
+        from torch._inductor.ir import MutationOutput
 
-        cls = cls or AllReduceAsyncFallback
         op = cls.__new__(cls)
         op.name = name
         op.inputs = [operand]
+        mutation_output = MutationOutput.__new__(MutationOutput)
+        mutation_output.mutation_names = [mutated] if mutated else []
+        op.mutation_outputs = [mutation_output]
+        op.alias_names = [mutated] if mutated else []
         return op
 
-    def test_only_a_sole_direct_collective_after_the_loop_is_planned(self):
+    def _collective(self, operand, cls=None, name="all_reduce", mutated="carry"):
+        from torch_spyre._inductor.ir import AllReduceKernel
+
+        return self._extern(cls or AllReduceKernel, operand, name, mutated)
+
+    def _wait(self, operand, name="wait", mutated="carry"):
+        from torch_spyre._inductor.ir import WaitKernel
+
+        return self._extern(WaitKernel, operand, name, mutated)
+
+    @staticmethod
+    def _reader(name="reader"):
+        from torch._inductor.ir import Pointwise
+
+        reader = _LoopOp(name)
+        reader.data = MagicMock(spec=Pointwise)
+        return reader
+
+    @staticmethod
+    def _editor(name_to_users):
+        from collections import defaultdict
+
+        from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
+
+        editor = GraphEditor.__new__(GraphEditor)
+        mutated: set[str] = set()
+        editor.lowering = SimpleNamespace(
+            name_to_users=defaultdict(list, name_to_users),
+            mark_buffer_mutated=mutated.add,
+            mutated_buffers=mutated,
+        )
+        return editor
+
+    def test_only_a_direct_collective_chain_after_the_loop_is_planned(self):
         from torch._inductor.ir import ReinterpretView, StorageBox, TensorBox
 
-        from torch_spyre._inductor.ir import AllGatherAsyncFallback
+        from torch_spyre._inductor.ir import AllGatherKernel
         from torch_spyre._inductor.scratchpad.allocator import (
-            _sole_post_loop_collective,
+            _post_loop_collective_chain,
         )
 
         carry = self._buffer("carry")
         anchor = _LoopOp("anchor", (0,))
         all_reduce = self._collective(TensorBox(StorageBox(carry)))
-        reader = _LoopOp("reader")
+        wait = self._wait(TensorBox(StorageBox(carry)))
+        reader = self._reader()
 
         def plan(operations, accessors):
             graph = SimpleNamespace(operations=operations)
-            return _sole_post_loop_collective(graph, "carry", accessors, anchor)
+            return _post_loop_collective_chain(graph, "carry", accessors, anchor)
 
-        with self.subTest("all_reduce after the loop"):
-            self.assertIs(plan([carry, anchor, all_reduce], [all_reduce]), all_reduce)
-        with self.subTest("a second post-loop reader"):
-            ops = [carry, anchor, all_reduce, reader]
-            self.assertIsNone(plan(ops, [all_reduce, reader]))
+        with self.subTest("all_reduce and its wait after the loop"):
+            ops = [carry, anchor, all_reduce, wait]
+            self.assertEqual(plan(ops, [all_reduce, wait]), (all_reduce, wait))
+        with self.subTest("readers of the result after the wait"):
+            ops = [carry, anchor, all_reduce, wait, reader]
+            self.assertEqual(
+                plan(ops, [all_reduce, wait, reader]), (all_reduce, wait, reader)
+            )
+        with self.subTest("no wait"):
+            self.assertEqual(plan([carry, anchor, all_reduce], [all_reduce]), ())
+        with self.subTest("a reader before the wait"):
+            ops = [carry, anchor, all_reduce, reader, wait]
+            self.assertEqual(plan(ops, [all_reduce, reader, wait]), ())
+        with self.subTest("a reader that cannot be repointed"):
+            opaque = _LoopOp("opaque")
+            ops = [carry, anchor, all_reduce, wait, opaque]
+            self.assertEqual(plan(ops, [all_reduce, wait, opaque]), ())
         with self.subTest("all_reduce before the loop ends"):
-            self.assertIsNone(plan([carry, all_reduce, anchor], [all_reduce]))
-        with self.subTest("the reader is not a collective"):
-            self.assertIsNone(plan([carry, anchor, reader], [reader]))
+            ops = [carry, all_reduce, wait, anchor]
+            self.assertEqual(plan(ops, [all_reduce, wait]), ())
+        with self.subTest("the first access is not a collective"):
+            ops = [carry, anchor, reader, wait]
+            self.assertEqual(plan(ops, [reader, wait]), ())
         with self.subTest("the operand is a view of the carry"):
             view = MagicMock(spec=ReinterpretView)
             through_view = self._collective(TensorBox(view))
-            self.assertIsNone(plan([carry, anchor, through_view], [through_view]))
+            ops = [carry, anchor, through_view, wait]
+            self.assertEqual(plan(ops, [through_view, wait]), ())
         with self.subTest("all_gather is not rewritten yet"):
             gather = self._collective(
-                TensorBox(StorageBox(carry)), cls=AllGatherAsyncFallback
+                TensorBox(StorageBox(carry)), cls=AllGatherKernel, mutated=None
             )
-            self.assertIsNone(plan([carry, anchor, gather], [gather]))
+            ops = [carry, anchor, gather, wait]
+            self.assertEqual(plan(ops, [gather, wait]), ())
 
-    def test_rewrite_moves_only_the_collective_onto_the_drain(self):
-        """The all_reduce reads and mutates the drain; the carry's own wrappers
-        and its other users are untouched."""
-        from collections import defaultdict
-
+    def test_rewrite_moves_the_whole_chain_onto_the_drain(self):
+        """The all_reduce reduces the drain in place, and its wait and the
+        readers of its result name the drain; the carry's own wrappers and its
+        other users are untouched."""
         from torch._inductor.ir import StorageBox, TensorBox
 
         from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
@@ -11784,41 +11841,61 @@ class TestDrainedCollective(unittest.TestCase):
         carry, drain = self._buffer("carry"), self._buffer("drain")
         operand = TensorBox(StorageBox(carry))
         all_reduce = self._collective(operand)
-        as_user = TensorBox(StorageBox(all_reduce))
-        other_user = TensorBox(StorageBox(self._buffer("other")))
-        editor = GraphEditor.__new__(GraphEditor)
-        editor.lowering = SimpleNamespace(
-            name_to_users=defaultdict(list, {"carry": [as_user, other_user]})
-        )
-        self.assertEqual(all_reduce.get_mutation_names(), ["carry"])
+        wait = self._wait(TensorBox(StorageBox(carry)))
+        reader = self._reader()
+        users = {
+            name: TensorBox(StorageBox(self._buffer(name)))
+            for name in ("all_reduce", "wait", "reader", "other")
+        }
+        editor = self._editor({"carry": list(users.values())})
+        editor._replace_loop_input = MagicMock()
 
-        editor.replace_collective_operand(all_reduce, "carry", drain)
+        editor.redirect_drained_users([all_reduce, wait, reader], "carry", drain)
 
         self.assertEqual(GraphEditor.collective_operand_name(all_reduce), "drain")
-        self.assertEqual(all_reduce.get_mutation_names(), ["drain"])
+        self.assertEqual(GraphEditor.wait_operand_name(wait), "drain")
+        for op in (all_reduce, wait):
+            self.assertEqual(op.mutation_outputs[0].get_mutation_names(), ["drain"])
+            self.assertEqual(op.alias_names, ["drain"])
+        editor._replace_loop_input.assert_called_once_with(reader, "carry", "drain")
         self.assertIsNot(all_reduce.inputs[0], operand)
         self.assertIs(operand.data.data, carry)
-        self.assertEqual(editor.lowering.name_to_users["carry"], [other_user])
-        self.assertEqual(editor.lowering.name_to_users["drain"], [as_user])
+        self.assertEqual(editor.lowering.mutated_buffers, {"drain"})
+        self.assertEqual(editor.lowering.name_to_users["carry"], [users["other"]])
+        self.assertEqual(
+            editor.lowering.name_to_users["drain"],
+            [users["all_reduce"], users["wait"], users["reader"]],
+        )
 
     def test_rewrite_rejects_a_drain_with_another_layout(self):
         """The collective's plan is sized from its operand's layout."""
-        from collections import defaultdict
-
         from torch._inductor.ir import StorageBox, TensorBox
-
-        from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 
         carry = self._buffer("carry")
         operand = TensorBox(StorageBox(carry))
         all_reduce = self._collective(operand)
-        editor = GraphEditor.__new__(GraphEditor)
-        editor.lowering = SimpleNamespace(name_to_users=defaultdict(list))
+        editor = self._editor({})
         with self.assertRaisesRegex(ValueError, "not addressing-equivalent"):
             editor.replace_collective_operand(
                 all_reduce, "carry", self._buffer("drain", size=(16, 64))
             )
         self.assertIs(all_reduce.inputs[0], operand)
+        self.assertEqual(all_reduce.mutation_outputs[0].mutation_names, ["carry"])
+
+    def test_collective_drain_caps_the_storage_lifetime_at_the_collective(self):
+        """The wait and readers move to the drain, so their uses of the carry
+        must not keep it live in the solve."""
+        from torch_spyre._inductor.scratchpad.allocator import _cap_drained_lifetimes
+
+        ops = [_LoopOp(f"op{i}") for i in range(6)]
+        graph = SimpleNamespace(operations=ops)
+        collective_plan = SimpleNamespace(collective=ops[3])
+        output_plan = SimpleNamespace(collective=None)
+        lifetimes = {"carry": [0, 1, 3, 4, 5], "out": [0, 1, 5], "x": [4, 5]}
+        _cap_drained_lifetimes(
+            lifetimes, {"carry": collective_plan, "out": output_plan}, graph
+        )
+        self.assertEqual(lifetimes, {"carry": [0, 1, 3], "out": [0, 1, 5], "x": [4, 5]})
 
 
 class _LoopOp:

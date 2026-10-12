@@ -170,23 +170,33 @@ class ExternalOperandTest(TestCase):
                     self.assertEqual(views, {})
                     project.assert_not_called()
 
-    def test_a_drained_collective_is_not_a_user_of_the_carry(self):
-        """A drain plan repoints this collective at a post-loop copy, so the
-        carry it still reads before the push is judged by its other users."""
+    def test_a_drained_collective_chain_is_not_a_user_of_the_carry(self):
+        """A drain plan repoints this collective, its wait and the readers of
+        its in-place result at a post-loop copy, so the carry they still read
+        before the push is judged by its other users."""
         graph = SimpleNamespace(try_get_buffer=lambda name: None)
         writer = mock.Mock(iteration_space_ownership=None)
         writer.get_name.return_value = "writer"
-        collective = mock.Mock(spec=ExternKernel)
-        collective.get_name.return_value = "all_reduce"
+        chain = []
+        for name in ("all_reduce", "wait"):
+            kernel = mock.Mock(spec=ExternKernel)
+            kernel.get_name.return_value = name
+            chain.append(kernel)
         write = mock.sentinel.write
         view = SimpleNamespace(work_slice_dims=[], same_partition=lambda _: True)
         utils = "torch_spyre._inductor.scratchpad.utils"
-        for drained, cores in ((None, -1), ({_BUF: "all_reduce"}, 1)):
+        for drained, cores in (
+            (None, -1),
+            ({_BUF: frozenset({"all_reduce"})}, -1),
+            ({_BUF: frozenset({"all_reduce", "wait"})}, 1),
+        ):
             with (
                 self.subTest(drained=drained),
                 mock.patch(
                     f"{utils}._get_buffer_user_deps",
-                    return_value={_BUF: [(writer, write), (collective, None)]},
+                    return_value={
+                        _BUF: [(writer, write), *((op, None) for op in chain)]
+                    },
                 ),
                 mock.patch(
                     f"{utils}._per_core_view_on_buf", return_value=(view, False, True)
@@ -200,7 +210,7 @@ class ExternalOperandTest(TestCase):
                     graph, drained_readers=drained
                 )
                 self.assertEqual(counts, {_BUF: cores})
-                self.assertEqual(_BUF in views, drained is not None)
+                self.assertEqual(_BUF in views, cores == 1)
 
 
 if __name__ == "__main__":

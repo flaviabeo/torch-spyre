@@ -2596,10 +2596,13 @@ class TestResidencyEdgeMatching(unittest.TestCase):
             editor_cls = stack.enter_context(
                 patch.object(allocator_module, "GraphEditor")
             )
-            # The validator asks the real editor which collectives it rewrites.
-            editor_cls.collective_operand_name.side_effect = (
-                GraphEditor.collective_operand_name
-            )
+            # The validator asks the real editor which ops it rewrites.
+            for name in (
+                "collective_operand_name",
+                "wait_operand_name",
+                "is_rewritable_consumer",
+            ):
+                getattr(editor_cls, name).side_effect = getattr(GraphEditor, name)
 
             plans = allocator_module.validated_drain_plans(
                 graph, division_is_fixed=False
@@ -2709,50 +2712,69 @@ class TestResidencyEdgeMatching(unittest.TestCase):
             # Why: the reader's edge on the storage exists but admits no pair.
             self.assertEqual(built["consumer"].cd_parent_matches.get("plain"), [])
 
-    def test_post_loop_all_reduce_reads_a_drain_of_the_resident_carry(self):
-        """A carry whose only post-loop use is an all_reduce stays in LX.
+    def test_post_loop_all_reduce_reduces_a_drain_of_the_resident_carry(self):
+        """A carry reduced in place by a post-loop all_reduce stays in LX.
 
-        The all_reduce's whole-buffer read has no residency edge, so as a
-        parent of the all_reduce the carry admits no division pair, which
-        forces it -- and every in-loop update -- into HBM.  The plan gives the
-        all_reduce a post-loop drain to read instead: the carry is no longer
-        its parent, the carry is resident, the push repoints the all_reduce at
-        the drain, and the carry's lifetime still ends at the all_reduce
-        rather than the graph exit (``tail`` runs after it).
+        The in-place all_reduce leaves its result in the carry, so its wait
+        and ``tail``, which reads the result, also name the carry.  The
+        all_reduce's whole-buffer read has no residency edge, so as a parent of
+        it the carry admits no division pair, which forces it -- and every
+        in-loop update -- into HBM.  The plan gives the all_reduce a post-loop
+        drain to reduce instead: the carry is no longer a parent of the
+        all_reduce, its wait or ``tail``, the carry is resident, the push
+        repoints all three at the drain, and the carry's lifetime ends at the
+        all_reduce rather than at ``tail``.
         """
         try:
             from ortools.sat.python import cp_model  # noqa: F401
         except ImportError:
             self.skipTest("the joint path needs the CP-SAT solver (ortools)")
-        from torch._inductor.ir import StorageBox, TensorBox
+        from torch._inductor.ir import MutationOutput, Pointwise, StorageBox, TensorBox
 
-        from torch_spyre._inductor.ir import AllReduceAsyncFallback
+        from torch_spyre._inductor.ir import AllReduceKernel, WaitKernel
 
         storage_op = self.op_by_name["plain"]
-        all_reduce = MagicMock(spec=AllReduceAsyncFallback)
-        all_reduce.get_name.return_value = "all_reduce"
-        all_reduce.inputs = [TensorBox(StorageBox(storage_op))]
+
+        def in_place(cls, name):
+            op = MagicMock(spec=cls)
+            op.get_name.return_value = name
+            op.inputs = [TensorBox(StorageBox(storage_op))]
+            mutation_output = MutationOutput.__new__(MutationOutput)
+            mutation_output.mutation_names = ["plain"]
+            op.mutation_outputs = [mutation_output]
+            return op
+
+        all_reduce = in_place(AllReduceKernel, "all_reduce")
+        wait = in_place(WaitKernel, "wait")
         tail_op = self._op("tail")
-        graph, ops = self._drained_carry_graph([all_reduce, tail_op], [tail_op])
-        # An extern kernel reads and writes whole buffers.
+        tail_op.data = MagicMock(spec=Pointwise)
+        graph, ops = self._drained_carry_graph([all_reduce, wait, tail_op], [tail_op])
+        # An extern kernel reads and writes whole buffers; an in-place one
+        # writes only its own NoneLayout name and its MutationOutput.
         self.rw[all_reduce] = SimpleNamespace(
             reads=OrderedSet([StarDep("plain")]),
-            writes=OrderedSet([StarDep("all_reduce")]),
+            writes=OrderedSet([StarDep("all_reduce"), StarDep("ar_mutation")]),
         )
-        self.rw[tail_op] = self._rw(["all_reduce"], ["tail"])
+        self.rw[wait] = SimpleNamespace(
+            reads=OrderedSet([StarDep("plain")]),
+            writes=OrderedSet([StarDep("wait"), StarDep("wait_mutation")]),
+        )
+        self.rw[tail_op] = self._rw(["plain"], ["tail"])
         mem_usage = {
             "plain": {"size": 256, "op_inputs": []},
             "update": {"size": -1, "op_inputs": ["plain"]},
             "consumer": {"size": 256, "op_inputs": ["update"]},
-            # An extern kernel's FixedLayout output is unsized.
+            # A NoneLayout extern kernel is unsized.
             "all_reduce": {"size": -1, "op_inputs": ["plain"]},
-            "tail": {"size": 256, "op_inputs": ["all_reduce"]},
+            "wait": {"size": -1, "op_inputs": ["plain"]},
+            "tail": {"size": 256, "op_inputs": ["plain"]},
         }
         residency = {
             "plain": None,
             "update": "op not allowed",
             "consumer": None,
             "all_reduce": "op not allowed",
+            "wait": "op not allowed",
             "tail": None,
         }
         divisions = {
@@ -2760,8 +2782,11 @@ class TestResidencyEdgeMatching(unittest.TestCase):
             "update": self.parent_divs,
             "consumer": self.consumer_divs[:2],
             "all_reduce": [CoreDivision(splits={})],
+            "wait": [CoreDivision(splits={})],
             "tail": self.parent_divs[:1],
         }
+        # Without a plan ``tail``'s read of the carry is a real edge.
+        self.divisions["tail"] = divisions["tail"]
 
         def run(with_plan):
             real_plans = allocator_module.validated_drain_plans
@@ -2769,14 +2794,16 @@ class TestResidencyEdgeMatching(unittest.TestCase):
             with patch.object(allocator_module, "validated_drain_plans", plans_fn):
                 return self._plan_solve_push(graph, divisions, mem_usage, residency)
 
-        with self.subTest("the collective is drained"):
+        with self.subTest("the collective chain is drained"):
             plans, built, solved, editor_cls = run(with_plan=True)
             self.assertEqual(set(plans), {"plain"})
             plan = plans["plain"]
             self.assertIs(plan.collective, all_reduce)
+            self.assertEqual(plan.drained_users, (all_reduce, wait, tail_op))
             self.assertIsNotNone(solved["plain"].address)
-            self.assertNotIn("plain", built["all_reduce"].parents)
-            # Live to the all_reduce (index 3), not to the graph exit (5).
+            for name in ("all_reduce", "wait", "tail"):
+                self.assertNotIn("plain", built[name].parents)
+            # Live to the all_reduce (index 3), not to ``tail`` (5).
             self.assertEqual(built["plain"].end_time, ops.index(all_reduce) + 1)
             editor = editor_cls.return_value
             editor.push_allocation_with_clone.assert_called_once_with(
@@ -2788,8 +2815,8 @@ class TestResidencyEdgeMatching(unittest.TestCase):
                 lower_anchor=plan.anchor_op,
             )
             drain = editor.push_allocation_with_clone.return_value
-            editor.replace_collective_operand.assert_called_once_with(
-                all_reduce, "plain", drain
+            editor.redirect_drained_users.assert_called_once_with(
+                [all_reduce, wait, tail_op], "plain", drain
             )
             editor.change_graph_output.assert_not_called()
 
@@ -2798,7 +2825,43 @@ class TestResidencyEdgeMatching(unittest.TestCase):
             self.assertIsNone(solved["plain"].address)
             self.assertIn("plain", built["all_reduce"].parents)
             self.assertNotIn("plain", built["all_reduce"].cd_parent_matches)
-            editor_cls.return_value.replace_collective_operand.assert_not_called()
+            editor_cls.return_value.redirect_drained_users.assert_not_called()
+
+    def test_a_returned_all_reduce_result_is_not_drained(self):
+        """The in-place all_reduce leaves its result in the carry, so a graph
+        that returns that result returns the carry: a drain would copy the
+        value from before the all_reduce, so no plan is made."""
+        from torch._inductor.ir import MutationOutput, StorageBox, TensorBox
+
+        from torch_spyre._inductor.ir import AllReduceKernel, WaitKernel
+
+        storage_op = self.op_by_name["plain"]
+        kernels = []
+        for cls, name in ((AllReduceKernel, "all_reduce"), (WaitKernel, "wait")):
+            op = MagicMock(spec=cls)
+            op.get_name.return_value = name
+            op.inputs = [TensorBox(StorageBox(storage_op))]
+            mutation_output = MutationOutput.__new__(MutationOutput)
+            mutation_output.mutation_names = ["plain"]
+            op.mutation_outputs = [mutation_output]
+            self.rw[op] = SimpleNamespace(
+                reads=OrderedSet([StarDep("plain")]),
+                writes=OrderedSet([StarDep(name)]),
+            )
+            kernels.append(op)
+        graph, _ops = self._drained_carry_graph(kernels, [storage_op])
+        with ExitStack() as stack:
+            stack.enter_context(self._patches())
+            stack.enter_context(
+                patch(
+                    "torch_spyre._inductor.scratchpad.allocator.clone_at_graph_boundaries",
+                    return_value=True,
+                )
+            )
+            plans = allocator_module.validated_drain_plans(
+                graph, division_is_fixed=False
+            )
+        self.assertEqual(plans, {})
 
     @staticmethod
     def _compatible(edge, parent_div, consumer_div):
