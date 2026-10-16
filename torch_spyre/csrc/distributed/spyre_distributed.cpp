@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <flex/flex.hpp>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <spyre_comms.hpp>
@@ -140,6 +141,10 @@ std::shared_ptr<spyre_comms::Context> ensure_context() {
   auto context = spyre_comms::get_world_context();
   if (context == nullptr) {
     SPYRE_RUNTIME_DEBUG() << "Initializing spyre-comms library";
+    // DEBUG(local): show which torch-spyre path initializes spyre-comms.
+    std::cerr << "[torch-spyre] ensure_context (compiled collective) "
+                 "initializing spyre-comms"
+              << std::endl;
     // Spyre Comms is initialised with the default Flex stream handle.  Because
     // all collective operations are injected into that same stream, Flex
     // enforces ordering between comms operations and any surrounding compute

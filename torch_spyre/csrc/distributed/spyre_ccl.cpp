@@ -46,6 +46,10 @@ SpyreCCLBackend::SpyreCCLBackend(const c10::intrusive_ptr<::c10d::Store>& store,
    * Start the communication library
    * Pass it the shared runtime library handle, and default stream.
    */
+  // DEBUG(local): show which torch-spyre path initializes spyre-comms.
+  std::cerr << "[torch-spyre] SpyreCCLBackend (process group) initializing "
+               "spyre-comms: rank="
+            << rank << " size=" << size << std::endl;
   spyre_comms::initialize_library(spyre::GlobalRuntime::get(),
                                   spyre::getDefaultStreamRuntimeHandle());
   group_context_ = spyre_comms::get_world_context();
