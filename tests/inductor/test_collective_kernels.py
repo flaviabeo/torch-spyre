@@ -255,5 +255,29 @@ class TestCodegen(_CollectiveGraphTest):
         self.assertEqual(len(wrapper.header_lines()), 2)
 
 
+class TestUpstreamRecognition(_CollectiveGraphTest):
+    """Upstream's comm/compute passes must see both halves of a collective."""
+
+    def test_is_collective_and_is_wait_see_spyre_nodes(self):
+        import torch._inductor.comms as comms
+        import torch._inductor.scheduler as scheduler
+        import torch._inductor.utils as utils
+
+        gathered = AllGatherKernel.create_out_of_place(
+            _c10d.all_gather_into_tensor.default, self._input(), 2, "group0"
+        )
+        WaitKernel.create_wait(_c10d.wait_tensor.default, TensorBox.create(gathered))
+        wait = self._last_op()
+
+        self.assertTrue(utils.is_collective(gathered))
+        self.assertFalse(utils.is_collective(wait))
+        # Upstream compares type(node) exactly; ir.py patches every module that
+        # imported is_wait by name, so the subclass is a wait everywhere.
+        for mod in (utils, comms, scheduler):
+            with self.subTest(mod.__name__):
+                self.assertTrue(mod.is_wait(wait))
+                self.assertFalse(mod.is_wait(gathered))
+
+
 if __name__ == "__main__":
     unittest.main()

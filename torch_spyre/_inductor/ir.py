@@ -683,3 +683,33 @@ class WaitKernel(ir._WaitKernel):
         input_name = self.inputs[0].codegen_reference()
         logger.debug("Codegen wait_work: %s", input_name)
         wrapper.writeline(f"torch.ops.spyre.wait_work({input_name})")
+
+
+def _install_is_wait_patch() -> None:
+    """Make upstream's ``is_wait`` recognise ``WaitKernel``.
+
+    Upstream checks ``type(node) is ir._WaitKernel``, an exact match, so a
+    subclass is invisible to the comm/compute overlap passes
+    (``reorder_for_compute_comm_overlap``, ``sink_waits``, ...) while the
+    matching collective is still found by the ``isinstance`` check in
+    ``is_collective``.  ``comms`` and ``scheduler`` import ``is_wait`` by
+    name, so each module's binding is replaced, not just ``utils``.
+    """
+    import torch._inductor.comms as comms
+    import torch._inductor.scheduler as scheduler
+    import torch._inductor.utils as utils
+
+    upstream = utils.is_wait
+    if getattr(upstream, "_spyre_patched", False):
+        return
+
+    def is_wait(node: Any) -> bool:
+        return isinstance(node, WaitKernel) or upstream(node)
+
+    is_wait._spyre_patched = True  # type: ignore[attr-defined]
+    for mod in (utils, comms, scheduler):
+        if getattr(mod, "is_wait", None) is upstream:
+            mod.is_wait = is_wait
+
+
+_install_is_wait_patch()
