@@ -8507,6 +8507,7 @@ class TestCustomPostFusionPassesOrder(unittest.TestCase):
         self.assertEqual(
             names,
             [
+                "sink_collective_waits",
                 "spyre_fuse_nodes",
                 "prepare_spyre_kernels",
                 "hbm_pool_planning",
