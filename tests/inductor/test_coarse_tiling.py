@@ -9980,12 +9980,13 @@ class TestDrainedCollective(unittest.TestCase):
 
         return self._kernel(WaitKernel, operand, name)
 
-    def _reader(self, name="reader"):
-        """A Pointwise loop reading the carry after the loop."""
+    def _reader(self, name="reader", mutates=()):
+        """A Pointwise loop reading the carry after the loop, writing ``mutates`` in place."""
         from torch._inductor.ir import Pointwise
 
         op = self._buffer(name)
         op.data = MagicMock(spec=Pointwise)
+        op.get_mutation_names.return_value = list(mutates)
         return op
 
     def test_only_fully_repointable_post_loop_accesses_are_planned(self):
@@ -10021,6 +10022,19 @@ class TestDrainedCollective(unittest.TestCase):
             opaque = _extern_op("opaque")
             ops = [carry, anchor, all_reduce, wait, opaque]
             self.assertEqual(plan(ops, [all_reduce, wait, opaque]), ())
+        with self.subTest("a loop that writes the carry in place"):
+            # Only its loads would be renamed, so it would read the drain and
+            # still write the carry.
+            writer = self._reader("writer", mutates=["carry"])
+            ops = [carry, anchor, all_reduce, wait, writer]
+            self.assertEqual(plan(ops, [all_reduce, wait, writer]), ())
+        with self.subTest("a loop that writes another buffer in place"):
+            other_writer = self._reader("other_writer", mutates=["other"])
+            ops = [carry, anchor, all_reduce, wait, other_writer]
+            self.assertEqual(
+                plan(ops, [all_reduce, wait, other_writer]),
+                ("all_reduce", "wait", "other_writer"),
+            )
         with self.subTest("all_reduce before the loop ends"):
             self.assertEqual(plan([carry, all_reduce, anchor], [all_reduce]), ())
         with self.subTest("no collective among the accesses"):

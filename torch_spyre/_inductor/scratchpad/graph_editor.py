@@ -422,13 +422,17 @@ class GraphEditor:
         """Whether :meth:`replace_post_loop_accesses` can move ``op`` off ``name``.
 
         A rewritable collective or a wait on ``name``, or a Pointwise/Reduction
-        loop (whose loads are renamed).
+        loop (whose loads are renamed) that does not write ``name`` in place:
+        renaming its loads would leave it reading ``new`` and writing ``name``.
         """
         if GraphEditor.collective_operand_name(op) == name:
             return True
         if isinstance(op, WaitKernel):
             return GraphEditor._sole_operand_name(op) == name
-        return GraphEditor.is_rewritable_consumer(op)
+        return (
+            GraphEditor.is_rewritable_consumer(op)
+            and name not in op.get_mutation_names()
+        )
 
     def replace_post_loop_accesses(
         self, accesses: Sequence[Operation], old_name: str, new: ComputedBuffer
