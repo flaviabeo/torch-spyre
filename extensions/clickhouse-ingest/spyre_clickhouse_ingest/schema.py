@@ -27,17 +27,43 @@ REF_KIND_VALUES = frozenset({"pullspec", "glob", "url"})
 RESULT_KIND_VALUES = frozenset({"functional", "performance", "capability"})
 # Which capability analysis produced a capability_runs row; also the test_type of a
 # result_kind='capability' verdict.
-CAPABILITY_TYPE_VALUES = frozenset({"model_ops", "model_modules", "model_support"})
+CAPABILITY_TYPE_VALUES = frozenset(
+    {"model_ops", "model_modules", "model_support", "model_serving"}
+)
 # spyre-test-framework's stages, each its own leg.
 SUITE_STAGE_VALUES = frozenset(
     {"fvt", "fvt-static", "fvt-dynamic", "svt", "svt-static", "svt-dynamic"}
 )
+# quality: accuracy evals (lm-eval tasks, MTEB, RAG), benchmark rows apart from perf's gates.
 TEST_TYPE_VALUES = (
-    frozenset({"smoke", "unit", "integration", "regression", "trunk", "perf"})
+    frozenset(
+        {"smoke", "unit", "integration", "regression", "trunk", "perf", "quality"}
+    )
     | SUITE_STAGE_VALUES
     | CAPABILITY_TYPE_VALUES
 )
 STATE_VALUES = frozenset({"passed", "failed", "error", "running"})
+# artifact_result_reasons.failure_reason, and props['failure_reason'] on a non-passing verdict:
+# spyre-frameworks' diagnose_failure.py categories plus the outcomes a log cannot show.
+FAILURE_REASON_VALUES = frozenset(
+    {
+        "test_failure",
+        "build_error",
+        "infra_disk",
+        "infra_network",
+        "infra_auth",
+        "infra_capacity",
+        "infra_hardware",
+        "infra_timeout",
+        "infra_env",
+        "superseded",
+        "aborted",
+        "dependency_failed",
+        "pipeline_error",
+        "ingest_error",
+        "unknown",
+    }
+)
 # capability_runs.status: not_implemented is unsupported, not a skipped test; undetermined is a
 # test that broke before giving a verdict.
 CAPABILITY_STATUS_VALUES = frozenset(
@@ -489,6 +515,48 @@ class ArtifactResults(Table):
     Row = ArtifactResultRow
 
 
+class ArtifactResultReasonRow(TypedDict):
+    artifact_id: str
+    run_id: str
+    result_kind: str
+    test_type: str
+    failure_reason: str
+    failure_subreason: str
+    failure_detail: str
+    failure_log_url: str
+    failure_wait_s: int
+    confidence: int
+    source: str
+    props: dict[str, str]
+
+
+class ArtifactResultReasons(Table):
+    """Why a verdict did not pass, written after the verdict itself; one row per source."""
+
+    name = "artifact_result_reasons"
+    columns = (
+        "artifact_id",
+        "run_id",
+        "result_kind",
+        "test_type",
+        "failure_reason",
+        "failure_subreason",
+        "failure_detail",
+        "failure_log_url",
+        "failure_wait_s",
+        "confidence",
+        "source",
+        "props",
+    )
+    required = ("source",)
+    enums = (
+        ("result_kind", RESULT_KIND_VALUES),
+        ("test_type", TEST_TYPE_VALUES),
+        ("failure_reason", FAILURE_REASON_VALUES),
+    )
+    Row = ArtifactResultReasonRow
+
+
 class PipelineRuns(Table):
     """One CI execution (Jenkins build or GHA run attempt / job), upserted start -> end.
 
@@ -522,6 +590,7 @@ class PipelineRuns(Table):
         "repo",
         "pr_number",
         "sha",
+        "test_with",
         "component",
         "arches",
         "result",
@@ -669,6 +738,7 @@ class ArtifactSubscriptions(Table):
         "payload_fields",
         "credential_id",
         "owner",
+        "updated_by",
         "notes",
         "props",
     )
@@ -734,6 +804,20 @@ class ArtifactDispatches(Table):
     )
 
 
+class DispatchTargets(Table):
+    """The dispatcher's allow-list, one snapshot per publish; an empty list is one '' / '' row."""
+
+    name = "dispatch_targets"
+    columns = (
+        "target_type",
+        "target_prefix",
+        "credential_id",
+        "published_at",
+        "job_run",
+    )
+    required = ("published_at",)
+
+
 # Constant API, kept so installed consumers name one table model rather than copying it.
 TEST_CASES = TestCases
 TEST_CASE_RUNS = TestCaseRuns
@@ -745,11 +829,13 @@ ARTIFACTS = Artifacts
 ARTIFACT_REFS = ArtifactRefs
 ARTIFACT_TAGS = ArtifactTags
 ARTIFACT_RESULTS = ArtifactResults
+ARTIFACT_RESULT_REASONS = ArtifactResultReasons
 PIPELINE_RUNS = PipelineRuns
 CI_RUN_TIMINGS = CiRunTimings
 ARTIFACT_SUBSCRIPTIONS = ArtifactSubscriptions
 DISPATCH_REQUESTS = DispatchRequests
 ARTIFACT_DISPATCHES = ArtifactDispatches
+DISPATCH_TARGETS = DispatchTargets
 
 TABLES = {
     t.name: t
@@ -762,6 +848,7 @@ TABLES = {
         ArtifactRefs,
         ArtifactTags,
         ArtifactResults,
+        ArtifactResultReasons,
         Capabilities,
         CapabilityRuns,
         PipelineRuns,
@@ -769,6 +856,7 @@ TABLES = {
         ArtifactSubscriptions,
         DispatchRequests,
         ArtifactDispatches,
+        DispatchTargets,
     )
 }
 

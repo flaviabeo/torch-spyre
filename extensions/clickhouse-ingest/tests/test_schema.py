@@ -328,7 +328,7 @@ def test_fact_tables_declare_no_identity_and_dimensions_do():
 
 def test_registry_covers_exactly_the_v2_tables():
     # The functional/benchmark four, the artifact four, the capability two, pipeline_runs,
-    # ci_run_timings and the dispatch three. Pinned as an exact set so adding a table to the DDL
+    # ci_run_timings and the dispatch four. Pinned as an exact set so adding a table to the DDL
     # without modelling it here (or vice versa) fails rather than drifting.
     assert set(TABLES) == {
         "test_cases",
@@ -339,6 +339,7 @@ def test_registry_covers_exactly_the_v2_tables():
         "artifact_refs",
         "artifact_tags",
         "artifact_results",
+        "artifact_result_reasons",
         "capabilities",
         "capability_runs",
         "pipeline_runs",
@@ -346,6 +347,7 @@ def test_registry_covers_exactly_the_v2_tables():
         "artifact_subscriptions",
         "dispatch_requests",
         "artifact_dispatches",
+        "dispatch_targets",
     }
 
 
@@ -487,6 +489,20 @@ ARTIFACT_COLUMN_ORDER = {
         "state",
         "arch",
         "duration_s",
+        "props",
+    ),
+    "artifact_result_reasons": (
+        "artifact_id",
+        "run_id",
+        "result_kind",
+        "test_type",
+        "failure_reason",
+        "failure_subreason",
+        "failure_detail",
+        "failure_log_url",
+        "failure_wait_s",
+        "confidence",
+        "source",
         "props",
     ),
 }

@@ -98,6 +98,7 @@ class Sandbox:
             "artifact_id",
         ),
         ("artifact_results", "{runs}", "run_id"),
+        ("artifact_result_reasons", "{runs}", "run_id"),
         ("artifact_subscriptions", "1", "subscription_id"),
         (
             "artifact_dispatches",
@@ -122,6 +123,13 @@ class Sandbox:
             "ci_run_timings",
             "run_key GLOBAL IN (SELECT run_key FROM {db}.pipeline_runs)",
             "(run_key, entry, component, artifact_name, arch, leg, attempt)",
+        ),
+        # By time: a pending or rejected upload has no run_id.
+        ("result_uploads", "ts >= now() - INTERVAL {days} DAY", "(upload_id, ts)"),
+        (
+            "dispatch_targets",
+            "published_at >= now() - INTERVAL {days} DAY",
+            "(published_at, target_type, target_prefix)",
         ),
     )
 
