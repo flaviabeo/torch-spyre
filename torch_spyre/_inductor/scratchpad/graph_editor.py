@@ -499,6 +499,10 @@ class GraphEditor:
             mutation.mutation_names = rename(mutation.mutation_names)
         if hasattr(op, "alias_names"):
             op.alias_names = rename(op.alias_names)
+        # ``old_name`` deliberately stays in ``mutated_buffers``: upstream only
+        # reads the set to veto optimizations (inlining, constant folding), so
+        # a stale entry is conservative, and the set cannot tell whether some
+        # other op still mutates ``old_name``.
         if getattr(op, "mutation_outputs", None):
             self.lowering.mutated_buffers.add(new_name)
         invalidate_op_read_writes(op)
