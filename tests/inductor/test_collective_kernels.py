@@ -28,7 +28,6 @@ import torch
 from torch import fx
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import (
-    FixedLayout,
     InputBuffer,
     NoneLayout,
     StorageBox,
@@ -38,10 +37,13 @@ from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch._subclasses.fake_tensor import FakeTensorMode
 
+from torch.spyre import SpyreTensorLayout
+
 from torch_spyre._inductor.ir import (
     AllGatherKernel,
     AllReduceKernel,
     BroadcastKernel,
+    FixedTiledLayout,
     WaitKernel,
     _dtype_to_int,
 )
@@ -78,10 +80,16 @@ class _CollectiveGraphTest(unittest.TestCase):
 
     @staticmethod
     def _input(name="x"):
-        buf = InputBuffer(
-            name=name,
-            layout=FixedLayout(torch.device("cpu"), torch.float16, _SIZE, [64, 1]),
+        # Collective codegen requires a finalized device layout, as layout
+        # propagation leaves it on real inputs.
+        layout = FixedTiledLayout(
+            torch.device("cpu"),
+            torch.float16,
+            _SIZE,
+            [64, 1],
+            SpyreTensorLayout(_SIZE, torch.float16),
         )
+        buf = InputBuffer(name=name, layout=layout)
         V.graph.name_to_buffer[name] = buf
         V.graph.graph_inputs[name] = buf
         return TensorBox(StorageBox(buf))

@@ -622,7 +622,7 @@ class SpyreCollectiveKernel(ir._CollectiveKernel, metaclass=abc.ABCMeta):
         """Emit plan call in header (compile-time) and run call in body (runtime)."""
         input_tensor = self.inputs[0]
         input_name = input_tensor.codegen_reference()
-        input_layout = input_tensor.get_layout()
+        input_layout = _collective_input_layout(input_tensor)
         dtype_code = _dtype_to_int(input_layout.dtype)
         num_elems = _compute_device_num_elems(input_layout)
 
@@ -757,24 +757,24 @@ def _install_is_wait_patch() -> None:
 _install_is_wait_patch()
 
 
-def get_copy_back_producer(x: IRNode) -> Optional[AllReduceKernel]:
-    """Find an in-place ``AllReduceKernel`` that needs copy-back after its wait.
+def get_copy_back_producer(x: IRNode) -> Optional[ir.Buffer]:
+    """Find the temporary buffer of an in-place all_reduce that needs copy-back.
 
-    Follows actual alias edges (not the graph-wide name registry) because
-    producer names may be rebound while these IR objects remain live consumers.
-    Returns the producer only when the lowering attached a ``mutation_target``.
+    ``AllReduceKernel`` has a ``NoneLayout``; the reduced data lives in the
+    buffer it mutates, a copy of the original view.  The lowering tags that
+    buffer with ``mutation_target`` (the original view) and
+    ``copy_back_result``.  Follows actual alias edges (not the graph-wide name
+    registry) because producer names may be rebound while these IR objects
+    remain live consumers.
     """
     while isinstance(x, (ir.MutableBox, ir.BaseView)):
         x = x.data
-    if (
-        isinstance(x, AllReduceKernel)
-        and getattr(x, "mutation_target", None) is not None
-    ):
+    if isinstance(x, ir.Buffer) and getattr(x, "mutation_target", None) is not None:
         return x
     return None
 
 
-def copy_back_view(waited: IRNode, producer: AllReduceKernel, target: IRNode) -> IRNode:
+def copy_back_view(waited: IRNode, producer: ir.Buffer, target: IRNode) -> IRNode:
     """Apply the waited view to the original target after full copy-back."""
     current = waited
     has_view = False

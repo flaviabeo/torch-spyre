@@ -2724,6 +2724,15 @@ def lower_any_def(x):
 _c10d = torch.ops._c10d_functional
 
 
+def _realize_collective_input(tensor):
+    # Views can retain their base allocation's padded descriptor. A copy
+    # obtains a finalized device layout for exactly the contributed elements.
+    if isinstance(tensor.data, ir.BaseView):
+        tensor = ir.ExternKernel.copy_input(tensor)
+    tensor.realize()
+    return tensor
+
+
 @register_spyre_lowering(_c10d.broadcast.default)
 def lower_c10d_broadcast(tensor, src_rank, group_name):
     """Out-of-place broadcast: broadcast_run writes a fresh output tensor."""
@@ -2732,6 +2741,7 @@ def lower_c10d_broadcast(tensor, src_rank, group_name):
         src_rank,
         group_name,
     )
+    tensor = _realize_collective_input(tensor)
     return ir.TensorBox.create(
         BroadcastKernel.create_out_of_place(
             _c10d.broadcast.default, tensor, src_rank, group_name
@@ -2752,9 +2762,13 @@ def lower_c10d_wait_tensor(tensor):
     producer = get_copy_back_producer(tensor)
     if producer is not None and producer.copy_back_result is not None:
         return copy_back_view(tensor, producer, producer.copy_back_result)
-    WaitKernel.create_wait(_c10d.wait_tensor.default, tensor)
-    if producer is not None:
-        result = ir.TensorBox.create(producer)
+    if producer is None:
+        WaitKernel.create_wait(_c10d.wait_tensor.default, tensor)
+    else:
+        # Even a wait on a slice must complete and copy back the entire
+        # in-place contribution, so wait on the full temporary buffer.
+        result = ir.TensorBox(ir.StorageBox(producer))
+        WaitKernel.create_wait(_c10d.wait_tensor.default, result)
         target = lowering.mutate_to(producer.mutation_target, result)
         producer.copy_back_result = target
         return copy_back_view(tensor, producer, target)
@@ -2762,6 +2776,7 @@ def lower_c10d_wait_tensor(tensor):
 
 
 def _all_gather(tensor, group_size, group_name):
+    tensor = _realize_collective_input(tensor)
     return ir.TensorBox.create(
         AllGatherKernel.create_out_of_place(
             _c10d.all_gather_into_tensor.default, tensor, group_size, group_name
@@ -2783,16 +2798,18 @@ def lower_c10d_all_gather(tensor, group_size, group_name):
 
 def _all_reduce_inplace(tensor, reduce_op, group_name):
     mutation_target = tensor if isinstance(tensor.data, ir.BaseView) else None
-    if mutation_target is not None:
-        tensor = ir.ExternKernel.copy_input(tensor)
-    tensor.realize()
+    tensor = _realize_collective_input(tensor)
     AllReduceKernel.create_inplace(
         _c10d.all_reduce_.default, tensor, reduce_op, group_name
     )
     if mutation_target is not None:
-        kernel = V.graph.operations[-1]
-        kernel.mutation_target = mutation_target
-        kernel.copy_back_result = None
+        # Tag the temporary buffer the kernel mutates; the wait lowering finds
+        # it through the waited tensor's alias chain and copies it back.
+        buf = tensor.data
+        while isinstance(buf, (ir.MutableBox, ir.BaseView)):
+            buf = buf.data
+        buf.mutation_target = mutation_target
+        buf.copy_back_result = None
     return tensor
 
 
