@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 from sympy import Expr
 import torch
 from torch._inductor.utils import ir_dataclass
+from torch._inductor.dependencies import index_vars_no_squeeze
 from torch._inductor.ir import (
     FixedLayout,
     IRNode,
@@ -38,6 +39,7 @@ from torch._inductor.virtualized import V
 import sympy
 from torch.utils._ordered_set import OrderedSet
 import torch._inductor.ir as ir
+from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 
 logger = get_inductor_logger("ir")
@@ -526,17 +528,42 @@ def _dtype_to_int(dtype: torch.dtype) -> int:
 def _compute_device_num_elems(layout: "FixedLayout") -> int:
     """Count storage in the scalar-type units passed to the collective planner.
 
-    For FixedTiledLayout (has device_layout), uses the actual device size.
-    For plain FixedLayout (intermediates), falls back to logical numel.
+    A finalized device layout is required: logical numel can omit padding.
     """
-    if isinstance(layout, FixedTiledLayout):
-        size_bytes = get_device_size_in_bytes(layout.device_layout)
-        # The plan receives layout.dtype too. Device element count alone would
-        # change byte coverage when host and device widths differ (e.g. int64).
-        element_size = torch.tensor([], dtype=layout.dtype).element_size()
-        return size_bytes // element_size
-    numel = sympy.prod(layout.size)
-    return int(V.graph.sizevars.guarding_hint_or_throw(numel))
+    if not isinstance(layout, FixedTiledLayout):
+        raise Unsupported("Collective input requires a finalized device layout")
+    size_bytes = get_device_size_in_bytes(layout.device_layout)
+    # The plan receives layout.dtype too. Device element count alone would
+    # change byte coverage when host and device widths differ (e.g. int64).
+    element_size = torch.tensor([], dtype=layout.dtype).element_size()
+    return size_bytes // element_size
+
+
+def _collective_input_layout(input_tensor: IRNode) -> FixedLayout:
+    layout = input_tensor.get_layout()
+    if not isinstance(layout, FixedTiledLayout):
+        # ExternKernel inputs can retain a pre-scheduling buffer object after
+        # the producer's device layout has been finalized. Use the allocation's
+        # padded layout only when it describes this exact input geometry.
+        producer = V.graph.try_get_buffer(input_tensor.get_name())
+        if producer is not None:
+            final_layout = producer.get_layout()
+            if (
+                isinstance(final_layout, FixedTiledLayout)
+                and layout.size == final_layout.size
+                and layout.stride == final_layout.stride
+                and layout.offset == final_layout.offset
+                and layout.dtype == final_layout.dtype
+            ):
+                return final_layout
+        # A view cannot borrow its base allocation's size, and logical numel
+        # cannot establish the view's padded size. Reject missing metadata
+        # rather than silently submitting a truncated collective.
+        raise Unsupported(
+            "Collective input view requires a finalized device layout matching "
+            "its size, stride, offset, and dtype"
+        )
+    return layout
 
 
 def _emit_plan_once(wrapper: PythonWrapperCodegen, plan_line: str) -> None:
@@ -728,3 +755,73 @@ def _install_is_wait_patch() -> None:
 
 
 _install_is_wait_patch()
+
+
+def get_copy_back_producer(x: IRNode) -> Optional[AllReduceKernel]:
+    """Find an in-place ``AllReduceKernel`` that needs copy-back after its wait.
+
+    Follows actual alias edges (not the graph-wide name registry) because
+    producer names may be rebound while these IR objects remain live consumers.
+    Returns the producer only when the lowering attached a ``mutation_target``.
+    """
+    while isinstance(x, (ir.MutableBox, ir.BaseView)):
+        x = x.data
+    if (
+        isinstance(x, AllReduceKernel)
+        and getattr(x, "mutation_target", None) is not None
+    ):
+        return x
+    return None
+
+
+def copy_back_view(waited: IRNode, producer: AllReduceKernel, target: IRNode) -> IRNode:
+    """Apply the waited view to the original target after full copy-back."""
+    current = waited
+    has_view = False
+    while isinstance(current, (ir.MutableBox, ir.BaseView)):
+        has_view |= isinstance(current, ir.BaseView)
+        if current.get_dtype() != producer.get_dtype():
+            raise Unsupported(
+                "dtype-changing views of an in-place collective before its wait; "
+                "wait on the full result before changing dtype"
+            )
+        current = current.data
+    if not has_view:
+        return target
+    layout = producer.get_layout()
+    if layout.offset != 0 or list(layout.stride) != list(
+        ir.FlexibleLayout.contiguous_strides(layout.size)
+    ):
+        raise Unsupported(
+            "a derived collective wait requires contiguous temporary storage"
+        )
+    (indices,), ranges = index_vars_no_squeeze(waited.get_size(), prefix="r")
+    indexer = V.graph.sizevars.simplify_with_ranges(
+        waited.make_indexer()(indices), ranges
+    )
+    waited_strides = V.graph.sizevars.stride_vars(indexer, indices)
+    target_storage = target
+    while isinstance(target_storage, (ir.MutableBox, ir.BaseView)):
+        target_storage = target_storage.data
+    target_offset = target.make_indexer()([sympy.S.Zero for _ in target.get_size()])
+    if list(waited_strides) != list(layout.stride) and (
+        target_offset != 0
+        or sympy.prod(target_storage.get_size()) != sympy.prod(target.get_size())
+    ):
+        raise Unsupported(
+            "stride-changing waits on an in-place collective target that "
+            "covers only part of its allocation"
+        )
+    source_size = producer.get_size()
+    unflatten = ir.View.dynamic_reshape_indexer(source_size, [sympy.prod(source_size)])
+    coordinates = [
+        V.graph.sizevars.simplify_with_ranges(coord, ranges)
+        for coord in unflatten([indexer])
+    ]
+
+    def reindex(index):
+        replacements = dict(zip(indices, index))
+        return [coord.xreplace(replacements) for coord in coordinates]
+
+    target_data = target.data if isinstance(target, TensorBox) else target
+    return TensorBox(ir.GenericView.create(target_data, waited.get_size(), reindex))
