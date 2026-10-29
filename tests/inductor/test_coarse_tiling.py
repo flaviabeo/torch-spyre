@@ -10157,6 +10157,7 @@ class TestDrainedCollective(unittest.TestCase):
             TensorBox,
         )
         from torch._inductor.virtualized import ops
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         from torch_spyre._inductor.ir import AllReduceKernel
         from torch_spyre._inductor.pass_utils import op_read_writes
@@ -10165,7 +10166,11 @@ class TestDrainedCollective(unittest.TestCase):
         )
         from torch_spyre._inductor.scratchpad.utils import calculate_liveness
 
-        with V.set_graph_handler(GraphLowering(fx.symbolic_trace(lambda: None))):
+        # create_inplace runs the op's Meta impl under the graph's fake mode.
+        with (
+            V.set_graph_handler(GraphLowering(fx.symbolic_trace(lambda: None))),
+            V.set_fake_mode(FakeTensorMode()),
+        ):
 
             def constant(name):
                 buf = ComputedBuffer(
@@ -10350,7 +10355,7 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
 
     def test_inserted_operation_does_not_hide_eligible_stage(self):
         allocator, buffer, graph, collective, external, gap, views = self._run_stage()
-        self.assertEqual(allocator._collective_output_stages, {"result": collective})
+        self.assertEqual(allocator._collective_output_stages, {"result": (collective,)})
         self.assertEqual(buffer.address, 0)
         external.assert_called_once_with(graph, [1, 2], excluded_op=collective)
         gap.assert_called_once_with(graph, "result", [1, 2])
@@ -10415,7 +10420,7 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
                 else:
                     self.assertEqual(staged.address, 512)
                     self.assertEqual(
-                        allocator._collective_output_stages, {"result": collective}
+                        allocator._collective_output_stages, {"result": (collective,)}
                     )
                     for start, end in spans:
                         self.assertTrue(
@@ -10423,18 +10428,25 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
                         )
 
     def test_stage_push_rewrites_a_captured_matmul_collective(self):
-        from torch._inductor.ir import ComputedBuffer
+        from torch._inductor.ir import ComputedBuffer, StorageBox, TensorBox
         from torch.fx.experimental.proxy_tensor import make_fx
 
         from torch_spyre._C import SpyreTensorLayout
-        from torch_spyre._inductor.ir import AllReduceKernel, FixedTiledLayout
+        from torch_spyre._inductor.ir import (
+            AllReduceKernel,
+            FixedTiledLayout,
+            WaitKernel,
+        )
         from torch_spyre._inductor.lowering import enable_spyre_lowerings
         from torch_spyre._inductor.pass_utils import (
             _is_matmul_op,
             op_read_writes,
             origin_in_graph,
         )
-        from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
+        from torch_spyre._inductor.scratchpad.allocator import (
+            ScratchpadAllocator,
+            _post_loop_collective_accesses,
+        )
         from torch_spyre._inductor.scratchpad.graph_editor import (
             GraphEditor,
             unwrapped_buffer_name,
@@ -10442,10 +10454,13 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
         from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
         from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
 
+        c10d = torch.ops._c10d_functional
+
         def fn(x, weight):
-            return torch.ops._c10d_functional.all_reduce.default(
-                x @ weight, "sum", "test_staging"
-            )
+            # The in-place form Inductor's reinplace pass produces; the
+            # functional all_reduce lowers onto a clone of the matmul instead.
+            reduced = c10d.all_reduce_.default(x @ weight, "sum", "test_staging")
+            return c10d.wait_tensor.default(reduced) * 2.0
 
         args = (
             torch.empty(8, 16, dtype=torch.float16),
@@ -10475,25 +10490,37 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
                 stride,
                 SpyreTensorLayout(size, stride, torch.float16, [0, 1]),
             )
-            # CPU lowering does not index the extern operand's users. Include
-            # the real collective wrapper to test the editor's index update.
-            collective_user = graph.graph_outputs[0]
-            self.assertEqual(
-                unwrapped_buffer_name(collective_user), collective.get_name()
+            (wait,) = [op for op in graph.operations if isinstance(op, WaitKernel)]
+            (reader,) = [
+                op
+                for op in graph.operations
+                if isinstance(op, ComputedBuffer)
+                and op is not source
+                and source.get_name() in {dep.name for dep in op_read_writes(op).reads}
+            ]
+            # The in-place result lives in the matmul's storage, so the wait
+            # and the reader access it too, and all three move to the drain.
+            accesses = _post_loop_collective_accesses(
+                graph, source.get_name(), [collective, wait, reader], source
             )
-            if collective_user not in graph.name_to_users[source.get_name()]:
-                graph.name_to_users[source.get_name()].append(collective_user)
+            self.assertEqual(accesses, (collective, wait, reader))
+            # CPU lowering does not index the extern operands' users. Include
+            # the real collective and wait to test the editor's index update.
+            for op in (collective, wait):
+                user = TensorBox(StorageBox(op))
+                self.assertEqual(unwrapped_buffer_name(user), op.get_name())
+                if user not in graph.name_to_users[source.get_name()]:
+                    graph.name_to_users[source.get_name()].append(user)
             original_operand = collective.inputs[0]
             old_users = list(graph.name_to_users[source.get_name()])
+            moved_names = {op.get_name() for op in accesses}
             moved_users = [
-                user
-                for user in old_users
-                if unwrapped_buffer_name(user) == collective.get_name()
+                user for user in old_users if unwrapped_buffer_name(user) in moved_names
             ]
             kept_users = [user for user in old_users if user not in moved_users]
             self.assertTrue(moved_users)
             allocator = ScratchpadAllocator(GreedyLayoutSolver, 4096)
-            allocator._collective_output_stages = {source.get_name(): collective}
+            allocator._collective_output_stages = {source.get_name(): accesses}
             view = object()
             allocator._push_allocation(
                 graph,
@@ -10516,10 +10543,18 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
             self.assertLess(
                 graph.operations.index(drain), graph.operations.index(collective)
             )
-            self.assertEqual(collective.get_mutation_names(), [drain_name])
+            # create_inplace records the mutation on a MutationOutput.
+            self.assertEqual(
+                [m.mutation_names for m in collective.mutation_outputs], [[drain_name]]
+            )
             self.assertIn(
                 drain_name, {dep.name for dep in op_read_writes(collective).reads}
             )
+            # The wait and the later reader follow the result onto the drain.
+            self.assertEqual(GraphEditor._sole_operand_name(wait), drain_name)
+            reader_reads = {dep.name for dep in op_read_writes(reader).reads}
+            self.assertIn(drain_name, reader_reads)
+            self.assertNotIn(source.get_name(), reader_reads)
             self.assertEqual(original_operand.get_name(), source.get_name())
             self.assertEqual(graph.name_to_users[drain_name], moved_users)
             self.assertEqual(graph.name_to_users[source.get_name()], kept_users)

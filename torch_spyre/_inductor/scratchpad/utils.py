@@ -14,7 +14,7 @@
 
 
 import math
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from typing import Optional
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
@@ -297,23 +297,26 @@ def storage_has_single_writer(
     graph: GraphLowering,
     producer: Operation,
     *,
-    transferred_mutation: Operation | None = None,
+    transferred_mutations: Sequence[Operation] = (),
 ) -> bool:
     """Prove fresh storage has no aliases or writers beyond its producer.
 
-    An explicitly transferred mutation (a collective moved onto a private
-    drain) may be exempted. Ordinary gathered sources have no exemption.
-    Inspect mutation/alias declarations as well as liveness dependencies.
+    Explicitly transferred mutations (a collective and its later accesses,
+    moved onto a private drain) are exempted, including the alias an in-place
+    collective declares on its operand. Ordinary gathered sources have no
+    exemption. Inspect mutation/alias declarations as well as liveness
+    dependencies.
     """
     name = producer.get_name()
     for op in graph.operations:
+        if any(op is moved for moved in transferred_mutations):
+            continue
         try:
             if (
-                (op is not transferred_mutation and name in op.get_mutation_names())
+                name in op.get_mutation_names()
                 or name in op.get_inputs_that_alias_output()
                 or (
                     op is not producer
-                    and op is not transferred_mutation
                     and any(dep.name == name for dep in op_read_writes(op).writes)
                 )
             ):

@@ -300,16 +300,21 @@ def _is_loop_carry_storage(op: Any) -> bool:
 
 
 def _collective_stage_storage_is_private(
-    graph: GraphLowering, producer: Operation, collective: Operation
+    graph: GraphLowering,
+    producer: Operation,
+    moved: Operation | Sequence[Operation],
 ) -> bool:
     """Prove a drain will observe the sole producer's final value.
 
     Liveness dependencies alone do not find every writer: a ComputedBuffer
     mutation can name its own write while its layout targets another buffer.
-    The selected collective's mutation is moved onto the drain; any other
-    mutation, alias or extra writer makes this transformation unsafe.
+    ``moved`` (the collective, and the accesses that follow it) is repointed
+    onto the drain with its mutations and aliases; any other mutation, alias or
+    extra writer makes this transformation unsafe.
     """
-    return storage_has_single_writer(graph, producer, transferred_mutation=collective)
+    if not isinstance(moved, Sequence):
+        moved = (moved,)
+    return storage_has_single_writer(graph, producer, transferred_mutations=moved)
 
 
 def _coarse_tile_loop_trip_count(op: Any) -> int:
@@ -1015,7 +1020,8 @@ class ScratchpadAllocator:
         # residency gate, the lifetime extension and the post-solve push.  The
         # placement path leaves this empty, which is its pre-change behavior.
         self._validated_drain_plans: dict[str, DrainPlan] = {}
-        self._collective_output_stages: dict[str, Operation] = {}
+        # Staged matmul result -> its collective (first) and every later access.
+        self._collective_output_stages: dict[str, tuple[Operation, ...]] = {}
 
     @staticmethod
     def _planned_lx_buffer_names(
@@ -2145,19 +2151,21 @@ class ScratchpadAllocator:
                 graph_editor.change_graph_output(buf, new_buffer)
 
             else:
-                collective = self._collective_output_stages.get(b.name)
-                if collective is not None:
+                accesses = self._collective_output_stages.get(b.name)
+                if accesses is not None:
                     # The result has private, disjoint frontend storage. Keep
                     # the collective's required HBM operand and its mutation
                     # on a separate ordinary clone with identical addressing.
+                    # The in-place result lives in that operand, so the wait
+                    # and every later reader move onto the clone too.
                     drained = graph_editor.push_allocation_with_clone(
                         buf,
-                        [collective],
+                        list(accesses),
                         input=False,
                         private=True,
                         lower_anchor=buf,
                     )
-                    graph_editor.replace_collective_operand(collective, b.name, drained)
+                    graph_editor.replace_post_loop_accesses(accesses, b.name, drained)
                 drain_plan = drain_plans.get(b.name)
                 if drain_plan is not None and drain_plan.collective is not None:
                     # The collective needs an HBM operand: give it a post-loop
@@ -3526,8 +3534,12 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         all relayout copies. Stages also have distinct addresses from each
         other. Thus it needs no lifetime relaxation, in-place alias, synthetic
         spill saving, or backend reservation hint. No free gap means no change.
-        Only a fresh, untiled matmul result with one bare collective consumer
-        qualifies; aliases, graph outputs and other readers retain HBM.
+        Only a fresh, untiled matmul result whose first consumer is a bare
+        in-place collective qualifies.  The collective's result lives in its
+        operand, so its wait and every later reader move onto the drain with it
+        (see :func:`_post_loop_collective_accesses`); a reader before the
+        collective, an unrepointable access, an alias or a graph output retains
+        HBM.
         """
         self._collective_output_stages = {}
         if not config.lx_collective_output_staging or not clone_at_graph_boundaries():
@@ -3558,15 +3570,22 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             placed.append(LifetimeBoundBuffer(b.name, span, [0], address=b.address))
 
         outputs = set(graph.get_output_names())
-        candidates: dict[str, Operation] = {}
+        candidates: dict[str, tuple[Operation, ...]] = {}
         copy_readers = {n for plan in relayouts for n in plan.consumer_names}
         for b in allocation:
             uses = current_uses.get(b.name, [])
-            if b.address is not None or b.name in outputs or len(uses) != 2:
+            if b.address is not None or b.name in outputs or len(uses) < 2:
                 continue
-            op, consumer = (graph.operations[i] for i in uses)
+            op, consumer = (graph.operations[i] for i in uses[:2])
+            accesses = _post_loop_collective_accesses(
+                graph, b.name, [graph.operations[i] for i in uses[1:]], op
+            )
             if (
-                not isinstance(op, ComputedBuffer)
+                not accesses
+                # The collective must be the first access after the producer:
+                # an earlier reader would need the un-drained value in LX.
+                or accesses[0] is not consumer
+                or not isinstance(op, ComputedBuffer)
                 or op.get_name() != b.name
                 or not _is_matmul_op(op)
                 or not isinstance(op.layout, FixedTiledLayout)
@@ -3578,13 +3597,15 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                 or origin_in_graph(consumer.origins, graph.graph) is None
             ):
                 continue
-            # The selected collective reads the HBM drain.
-            if _extern_kernel_in_live_range(graph, uses, excluded_op=consumer):
+            # The collective and every later access read the HBM drain, so the
+            # LX value lives only from the producer to the collective.
+            lx_uses = uses[:2]
+            if _extern_kernel_in_live_range(graph, lx_uses, excluded_op=consumer):
                 continue
-            if not _collective_stage_storage_is_private(graph, op, consumer):
+            if not _collective_stage_storage_is_private(graph, op, accesses):
                 continue
             if buffer_not_read_in_full(graph, b.name) or _would_produce_lx_back_gap(
-                graph, b.name, uses
+                graph, b.name, lx_uses
             ):
                 continue
             if b.name not in copy_readers and not any(
@@ -3593,14 +3614,18 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                 for dep in op_read_writes(op).reads
             ):
                 continue
-            candidates[b.name] = consumer
+            candidates[b.name] = accesses
         if not candidates:
             return
         _, _, views = get_ncores_for_buffers(
             graph,
-            drained_readers={name: op.get_name() for name, op in candidates.items()},
+            drained_readers={
+                name: {op.get_name() for op in accesses}
+                for name, accesses in candidates.items()
+            },
         )
-        for name, collective in candidates.items():
+        for name, accesses in candidates.items():
+            collective = accesses[0]
             view = views.get(name)
             if view is None:
                 # The ownership judge also rejects K-split writers: only the
@@ -3622,7 +3647,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             placed.append(scratch)
             b = by_name[name]
             b.address, b.lx_view, b.spill_reason = scratch.address, view, None
-            self._collective_output_stages[name] = collective
+            self._collective_output_stages[name] = accesses
             logger.debug(
                 "collective output stage: %s LX [%d, %d), HBM drain before %s",
                 name,
