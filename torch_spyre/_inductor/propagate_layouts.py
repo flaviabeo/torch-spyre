@@ -3608,6 +3608,26 @@ def _clean_mutation_op_output_layout(node: ComputedBuffer) -> FixedLayout:
     )
 
 
+def _resolve_none_layout_reads(reads):
+    """Rename reads of NoneLayout mutation outputs to the buffer they mutate.
+
+    This pass runs after scheduler init, so a read that follows an in-place op
+    with no buffer of its own (e.g. a ``WaitKernel``) has been renamed to that
+    op's ``MutationOutput``.  Its layout lives on the mutated buffer.
+    """
+    real_names = V.graph.scheduler.mutation_real_name
+    renames = {}
+    for dep in reads:
+        real_name = real_names.get(dep.name)
+        if real_name is not None and isinstance(
+            V.graph.get_buffer(dep.name).layout, NoneLayout
+        ):
+            renames[dep.name] = real_name
+    if not renames:
+        return reads
+    return [dep.rename(renames) for dep in reads]
+
+
 def propagate_mutation_layouts(
     nodes: list,
 ) -> list:
@@ -3634,7 +3654,7 @@ def propagate_mutation_layouts(
             else:
                 rw = n.read_writes
                 output_dep = next(iter(rw.writes))
-                args = _get_prop_args(rw.reads)
+                args = _get_prop_args(_resolve_none_layout_reads(rw.reads))
                 output = _clean_mutation_op_output_layout(n.node)
                 if not args:
                     # No propagatable args -- e.g. a constant_pad_nd fill whose only
