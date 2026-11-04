@@ -1,0 +1,4 @@
+torch-spyre refactor_to_collectivekernel 07a30b42
+flex main 93601a80b
+spyre-comms main 9d321cad
+run: Wed Nov  4 18:58 UTC 2026 (logs/)

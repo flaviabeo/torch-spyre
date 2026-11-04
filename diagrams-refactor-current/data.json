@@ -1,0 +1,698 @@
+{
+ "r0": {
+  "cbs": [
+   {
+    "i": 0,
+    "tag": 105,
+    "label": "dma_h2d_0",
+    "queue": 65,
+    "pipeline": "ASYNC_DMAI",
+    "barrier_bit": false,
+    "sched": -0.028,
+    "send": 0.26,
+    "bar_enter": -0.01,
+    "bar_exit": -0.004,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 0.295,
+    "resp": 0.345,
+    "cb": 0.401,
+    "done": 0.461
+   },
+   {
+    "i": 1,
+    "tag": 106,
+    "label": "spyre_kernel_v1_fused_wait_tensor_udj4dou2wlaisoej#2",
+    "queue": 14,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 0.311,
+    "send": 0.836,
+    "bar_enter": 0.325,
+    "bar_exit": 0.48,
+    "bar_fences": 3,
+    "bar_kinds": "compute=0 dmai=3 dmao=0",
+    "door": 0.88,
+    "resp": 0.902,
+    "cb": 0.943,
+    "done": 0.966
+   },
+   {
+    "i": 2,
+    "tag": 107,
+    "label": "[WS 2.0] hdma_hcoll_data_mv_d2h_d2h_compute_0",
+    "queue": 15,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 1.06,
+    "send": 1.116,
+    "bar_enter": 1.076,
+    "bar_exit": 1.081,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.125,
+    "resp": 1.144,
+    "cb": 1.19,
+    "done": 1.244
+   },
+   {
+    "i": 3,
+    "tag": 108,
+    "label": "[WS 2.0] hdma_hcoll_hwsid_wait p2p_rdma_wait",
+    "queue": 16,
+    "pipeline": "COMPUTE",
+    "barrier_bit": false,
+    "sched": 1.311,
+    "send": 1.392,
+    "bar_enter": 1.318,
+    "bar_exit": 1.323,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.406,
+    "resp": 1.446,
+    "cb": 1.471,
+    "done": 1.491
+   },
+   {
+    "i": 4,
+    "tag": 109,
+    "label": "[WS 2.0] hdma_hcoll_data_mv_h2d_h2d_compute_0",
+    "queue": 17,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 1.451,
+    "send": 1.679,
+    "bar_enter": 1.529,
+    "bar_exit": 1.565,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.687,
+    "resp": 1.788,
+    "cb": 1.806,
+    "done": 1.857
+   },
+   {
+    "i": 5,
+    "tag": 110,
+    "label": "[WS 2.0]  /tmp/ibm.spyrecomms.1000810000.1bc32124-60be-4ec4-8c4e-5bce94efdc73/spyre-comms/ops/rank_0/key_wsi_0/bundle_Allreduce_0/sdsc_add_0/bundle.mlir",
+    "queue": 18,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 1.71,
+    "send": 1.978,
+    "bar_enter": 1.717,
+    "bar_exit": 1.724,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.987,
+    "resp": 2.012,
+    "cb": 2.029,
+    "done": 2.066
+   },
+   {
+    "i": 6,
+    "tag": 111,
+    "label": "dma_d2h_compute_0",
+    "queue": 19,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 2.042,
+    "send": 2.163,
+    "bar_enter": 2.092,
+    "bar_exit": 2.099,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 2.172,
+    "resp": 2.198,
+    "cb": 2.219,
+    "done": 2.302
+   },
+   {
+    "i": 7,
+    "tag": 112,
+    "label": "p2p_rdma_wait",
+    "queue": 20,
+    "pipeline": "COMPUTE",
+    "barrier_bit": false,
+    "sched": 2.278,
+    "send": 2.364,
+    "bar_enter": 2.284,
+    "bar_exit": 2.331,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 2.384,
+    "resp": 2.407,
+    "cb": 2.428,
+    "done": 2.453
+   },
+   {
+    "i": 8,
+    "tag": 113,
+    "label": "[WS 2.0] comms_ws_end",
+    "queue": 21,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 2.412,
+    "send": 2.519,
+    "bar_enter": 2.481,
+    "bar_exit": 2.488,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 2.527,
+    "resp": 2.545,
+    "cb": 2.629,
+    "done": 2.722
+   },
+   {
+    "i": 9,
+    "tag": 114,
+    "label": "dma_h2d_0",
+    "queue": 66,
+    "pipeline": "ASYNC_DMAI",
+    "barrier_bit": false,
+    "sched": 2.559,
+    "send": 2.832,
+    "bar_enter": 2.575,
+    "bar_exit": 2.697,
+    "bar_fences": 8,
+    "bar_kinds": "compute=8 dmai=0 dmao=0",
+    "door": 2.839,
+    "resp": 2.859,
+    "cb": 2.889,
+    "done": 2.929
+   },
+   {
+    "i": 10,
+    "tag": 115,
+    "label": "spyre_kernel_v1_fused_add_sjanuyykodeejjl6#2",
+    "queue": 22,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 2.871,
+    "send": 3.138,
+    "bar_enter": 2.964,
+    "bar_exit": 2.994,
+    "bar_fences": 1,
+    "bar_kinds": "compute=0 dmai=1 dmao=0",
+    "door": 3.149,
+    "resp": 3.177,
+    "cb": 3.197,
+    "done": 3.278
+   },
+   {
+    "i": 11,
+    "tag": 116,
+    "label": "dma_h2d_0",
+    "queue": 67,
+    "pipeline": "ASYNC_DMAI",
+    "barrier_bit": false,
+    "sched": 3.179,
+    "send": 3.396,
+    "bar_enter": 3.234,
+    "bar_exit": 3.25,
+    "bar_fences": 1,
+    "bar_kinds": "compute=1 dmai=0 dmao=0",
+    "door": 3.406,
+    "resp": 3.437,
+    "cb": 3.488,
+    "done": 3.512
+   },
+   {
+    "i": 12,
+    "tag": 117,
+    "label": "spyre_kernel_v1_fused_add_vuf77ama5i3hdpin#2",
+    "queue": 23,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 3.444,
+    "send": 3.763,
+    "bar_enter": 3.467,
+    "bar_exit": 3.522,
+    "bar_fences": 1,
+    "bar_kinds": "compute=0 dmai=1 dmao=0",
+    "door": 3.77,
+    "resp": 3.79,
+    "cb": 3.868,
+    "done": 3.889
+   },
+   {
+    "i": 13,
+    "tag": 118,
+    "label": "dma_d2h_0",
+    "queue": 29,
+    "pipeline": "ASYNC_DMAO",
+    "barrier_bit": false,
+    "sched": 3.817,
+    "send": 4.024,
+    "bar_enter": 3.837,
+    "bar_exit": 3.908,
+    "bar_fences": 1,
+    "bar_kinds": "compute=1 dmai=0 dmao=0",
+    "door": 4.034,
+    "resp": 4.053,
+    "cb": 4.101,
+    "done": 4.151
+   },
+   {
+    "i": 14,
+    "tag": 119,
+    "label": "dma_d2h_0",
+    "queue": 30,
+    "pipeline": "ASYNC_DMAO",
+    "barrier_bit": false,
+    "sched": 4.328,
+    "send": 4.392,
+    "bar_enter": null,
+    "bar_exit": null,
+    "bar_fences": null,
+    "bar_kinds": null,
+    "door": 4.399,
+    "resp": 4.42,
+    "cb": 4.465,
+    "done": 4.517
+   }
+  ],
+  "log": [
+   [
+    -0.123,
+    "Block assigned: size=256 bytes, region_id=34359738496, offset=0, remaining_free=17179868928 bytes"
+   ],
+   [
+    0.0,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): new"
+   ],
+   [
+    0.046,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): allocDev(512 bytes, reason:\"temp_OFF_R0_T0\")"
+   ],
+   [
+    0.123,
+    "Block assigned: size=512 bytes, region_id=34359738496, offset=256, remaining_free=17179868416 bytes"
+   ],
+   [
+    0.198,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): start()"
+   ],
+   [
+    0.227,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): enqueuing for global slot"
+   ],
+   [
+    0.236,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): acquired global slot"
+   ],
+   [
+    0.282,
+    "LaunchAll: WorkSchedule (2) wsi_ids=[0]"
+   ],
+   [
+    0.452,
+    "HDMA P2P Protocol: Begin Trace (context_id=0, work_schedule_id=2)"
+   ],
+   [
+    1.273,
+    "Launched WorkSchedule (2) with 2 operations"
+   ],
+   [
+    1.347,
+    "Block freed: address=0x0, size=512 bytes, region_id=103079215232"
+   ],
+   [
+    1.371,
+    "Destroying ~SpyreCommsWorkSchedule(id:0 of max:2) wsi_ids: [0] ; appended ws_ids: []"
+   ],
+   [
+    1.371,
+    "Destroying ~SpyreCommsWorkSchedule(id:0 of max:2) wsi_ids: [0] ; appended ws_ids: []"
+   ],
+   [
+    1.386,
+    "Block freed: address=0x0, size=256 bytes, region_id=85899346048"
+   ],
+   [
+    1.594,
+    "Block assigned: size=256 bytes, region_id=85899346048, offset=0, remaining_free=17179868928 bytes"
+   ],
+   [
+    1.742,
+    "RuntimeStream::synchronize() device=0 waiting for 2 in-flight ops"
+   ],
+   [
+    4.166,
+    "RuntimeStream::synchronize() device=0 completed after 2ms"
+   ],
+   [
+    4.188,
+    "Block freed: address=0x0, size=256 bytes, region_id=85899346048"
+   ]
+  ]
+ },
+ "r1": {
+  "cbs": [
+   {
+    "i": 0,
+    "tag": 105,
+    "label": "dma_h2d_0",
+    "queue": 65,
+    "pipeline": "ASYNC_DMAI",
+    "barrier_bit": false,
+    "sched": -0.704,
+    "send": -0.403,
+    "bar_enter": -0.684,
+    "bar_exit": -0.677,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": -0.393,
+    "resp": -0.371,
+    "cb": -0.355,
+    "done": -0.34
+   },
+   {
+    "i": 1,
+    "tag": 106,
+    "label": "spyre_kernel_v1_fused_wait_tensor_udj4dou2wlaisoej#2",
+    "queue": 14,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": -0.28,
+    "send": -0.123,
+    "bar_enter": -0.268,
+    "bar_exit": -0.239,
+    "bar_fences": 3,
+    "bar_kinds": "compute=0 dmai=3 dmao=0",
+    "door": -0.103,
+    "resp": -0.075,
+    "cb": -0.06,
+    "done": -0.036
+   },
+   {
+    "i": 2,
+    "tag": 107,
+    "label": "[WS 2.0] hdma_hcoll_data_mv_d2h_d2h_compute_0",
+    "queue": 15,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 0.634,
+    "send": 0.694,
+    "bar_enter": 0.653,
+    "bar_exit": 0.658,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 0.702,
+    "resp": 0.722,
+    "cb": 0.771,
+    "done": 0.821
+   },
+   {
+    "i": 3,
+    "tag": 108,
+    "label": "[WS 2.0] hdma_hcoll_hwsid_wait p2p_rdma_wait",
+    "queue": 16,
+    "pipeline": "COMPUTE",
+    "barrier_bit": false,
+    "sched": 0.864,
+    "send": 0.959,
+    "bar_enter": 0.873,
+    "bar_exit": 0.879,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 0.967,
+    "resp": 1.298,
+    "cb": 1.407,
+    "done": 1.431
+   },
+   {
+    "i": 4,
+    "tag": 109,
+    "label": "[WS 2.0] hdma_hcoll_data_mv_h2d_h2d_compute_0",
+    "queue": 17,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 0.993,
+    "send": 1.187,
+    "bar_enter": 1.037,
+    "bar_exit": 1.045,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.197,
+    "resp": 1.298,
+    "cb": 1.44,
+    "done": 1.497
+   },
+   {
+    "i": 5,
+    "tag": 110,
+    "label": "[WS 2.0]  /tmp/ibm.spyrecomms.1000810000.1bc32124-60be-4ec4-8c4e-5bce94efdc73/spyre-comms/ops/rank_1/key_wsi_0/bundle_Allreduce_0/sdsc_add_0/bundle.mlir",
+    "queue": 18,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 1.214,
+    "send": 1.565,
+    "bar_enter": 1.219,
+    "bar_exit": 1.229,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.577,
+    "resp": 1.613,
+    "cb": 1.662,
+    "done": 1.686
+   },
+   {
+    "i": 6,
+    "tag": 111,
+    "label": "dma_d2h_compute_0",
+    "queue": 19,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 1.602,
+    "send": 1.744,
+    "bar_enter": 1.631,
+    "bar_exit": 1.636,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.751,
+    "resp": 1.77,
+    "cb": 1.847,
+    "done": 1.9
+   },
+   {
+    "i": 7,
+    "tag": 112,
+    "label": "p2p_rdma_wait",
+    "queue": 20,
+    "pipeline": "COMPUTE",
+    "barrier_bit": false,
+    "sched": 1.79,
+    "send": 1.827,
+    "bar_enter": 1.795,
+    "bar_exit": 1.801,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.921,
+    "resp": 2.213,
+    "cb": 2.223,
+    "done": 2.245
+   },
+   {
+    "i": 8,
+    "tag": 113,
+    "label": "[WS 2.0] comms_ws_end",
+    "queue": 21,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 1.937,
+    "send": 1.972,
+    "bar_enter": 1.943,
+    "bar_exit": 1.949,
+    "bar_fences": 0,
+    "bar_kinds": "compute=0 dmai=0 dmao=0",
+    "door": 1.978,
+    "resp": 2.213,
+    "cb": 2.282,
+    "done": 2.308
+   },
+   {
+    "i": 9,
+    "tag": 114,
+    "label": "dma_h2d_0",
+    "queue": 66,
+    "pipeline": "ASYNC_DMAI",
+    "barrier_bit": false,
+    "sched": 1.991,
+    "send": 2.442,
+    "bar_enter": 2.002,
+    "bar_exit": 2.345,
+    "bar_fences": 8,
+    "bar_kinds": "compute=8 dmai=0 dmao=0",
+    "door": 2.449,
+    "resp": 2.468,
+    "cb": 2.521,
+    "done": 2.587
+   },
+   {
+    "i": 10,
+    "tag": 115,
+    "label": "spyre_kernel_v1_fused_add_sjanuyykodeejjl6#2",
+    "queue": 22,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 2.495,
+    "send": 2.783,
+    "bar_enter": 2.566,
+    "bar_exit": 2.61,
+    "bar_fences": 1,
+    "bar_kinds": "compute=0 dmai=1 dmao=0",
+    "door": 2.802,
+    "resp": 2.817,
+    "cb": 2.841,
+    "done": 2.865
+   },
+   {
+    "i": 11,
+    "tag": 116,
+    "label": "dma_h2d_0",
+    "queue": 67,
+    "pipeline": "ASYNC_DMAI",
+    "barrier_bit": false,
+    "sched": 2.823,
+    "send": 2.999,
+    "bar_enter": 2.9,
+    "bar_exit": 2.911,
+    "bar_fences": 1,
+    "bar_kinds": "compute=1 dmai=0 dmao=0",
+    "door": 3.011,
+    "resp": 3.066,
+    "cb": 3.078,
+    "done": 3.102
+   },
+   {
+    "i": 12,
+    "tag": 117,
+    "label": "spyre_kernel_v1_fused_add_vuf77ama5i3hdpin#2",
+    "queue": 23,
+    "pipeline": "COMPUTE",
+    "barrier_bit": true,
+    "sched": 3.028,
+    "send": 3.343,
+    "bar_enter": 3.043,
+    "bar_exit": 3.112,
+    "bar_fences": 1,
+    "bar_kinds": "compute=0 dmai=1 dmao=0",
+    "door": 3.351,
+    "resp": 3.37,
+    "cb": 3.443,
+    "done": 3.467
+   },
+   {
+    "i": 13,
+    "tag": 118,
+    "label": "dma_d2h_0",
+    "queue": 29,
+    "pipeline": "ASYNC_DMAO",
+    "barrier_bit": false,
+    "sched": 3.397,
+    "send": 3.602,
+    "bar_enter": 3.412,
+    "bar_exit": 3.486,
+    "bar_fences": 1,
+    "bar_kinds": "compute=1 dmai=0 dmao=0",
+    "door": 3.611,
+    "resp": 3.651,
+    "cb": 3.666,
+    "done": 3.721
+   },
+   {
+    "i": 14,
+    "tag": 119,
+    "label": "dma_d2h_0",
+    "queue": 30,
+    "pipeline": "ASYNC_DMAO",
+    "barrier_bit": false,
+    "sched": 3.862,
+    "send": 3.925,
+    "bar_enter": null,
+    "bar_exit": null,
+    "bar_fences": null,
+    "bar_kinds": null,
+    "door": 3.943,
+    "resp": 3.98,
+    "cb": 3.995,
+    "done": 4.047
+   }
+  ],
+  "log": [
+   [
+    -0.785,
+    "Block assigned: size=256 bytes, region_id=34359738496, offset=0, remaining_free=17179868928 bytes"
+   ],
+   [
+    -0.68,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): new"
+   ],
+   [
+    -0.617,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): allocDev(512 bytes, reason:\"temp_OFF_R1_T0\")"
+   ],
+   [
+    -0.593,
+    "Block assigned: size=512 bytes, region_id=34359738496, offset=256, remaining_free=17179868416 bytes"
+   ],
+   [
+    -0.554,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): start()"
+   ],
+   [
+    -0.514,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): enqueuing for global slot"
+   ],
+   [
+    -0.507,
+    "SpyreCommsWorkSchedule(UNDEFINED, id:2): acquired global slot"
+   ],
+   [
+    0.258,
+    "LaunchAll: WorkSchedule (2) wsi_ids=[0]"
+   ],
+   [
+    0.449,
+    "HDMA P2P Protocol: Begin Trace (context_id=0, work_schedule_id=2)"
+   ],
+   [
+    0.851,
+    "Launched WorkSchedule (2) with 2 operations"
+   ],
+   [
+    0.99,
+    "Block freed: address=0x0, size=512 bytes, region_id=103079215232"
+   ],
+   [
+    1.014,
+    "Destroying ~SpyreCommsWorkSchedule(id:0 of max:2) wsi_ids: [0] ; appended ws_ids: []"
+   ],
+   [
+    1.014,
+    "Destroying ~SpyreCommsWorkSchedule(id:0 of max:2) wsi_ids: [0] ; appended ws_ids: []"
+   ],
+   [
+    1.072,
+    "Block freed: address=0x0, size=256 bytes, region_id=85899346048"
+   ],
+   [
+    1.158,
+    "Block assigned: size=256 bytes, region_id=85899346048, offset=0, remaining_free=17179868928 bytes"
+   ],
+   [
+    1.366,
+    "RuntimeStream::synchronize() device=1 waiting for 3 in-flight ops"
+   ],
+   [
+    3.735,
+    "RuntimeStream::synchronize() device=1 completed after 2ms"
+   ],
+   [
+    3.755,
+    "Block freed: address=0x0, size=256 bytes, region_id=85899346048"
+   ]
+  ]
+ }
+}

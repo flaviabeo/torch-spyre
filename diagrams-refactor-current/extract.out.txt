@@ -1,0 +1,68 @@
+== r0
+ 0    105 ASYNC_D q65  - sched -0.028 bar -0.01->-0.004 (0) send 0.26 door 0.295 resp 0.345 cb 0.401 done 0.461  dma_h2d_0
+ 1    106 COMPUTE q14  B sched 0.311 bar 0.325->0.48 (3) send 0.836 door 0.88 resp 0.902 cb 0.943 done 0.966  wait_tensor_udj4dou2wlaisoej#2
+ 2    107 COMPUTE q15  B sched 1.06 bar 1.076->1.081 (0) send 1.116 door 1.125 resp 1.144 cb 1.19 done 1.244  coll_data_mv_d2h_d2h_compute_0
+ 3    108 COMPUTE q16  - sched 1.311 bar 1.318->1.323 (0) send 1.392 door 1.406 resp 1.446 cb 1.471 done 1.491  hcoll_hwsid_wait p2p_rdma_wait
+ 4    109 COMPUTE q17  B sched 1.451 bar 1.529->1.565 (0) send 1.679 door 1.687 resp 1.788 cb 1.806 done 1.857  coll_data_mv_h2d_h2d_compute_0
+ 5    110 COMPUTE q18  B sched 1.71 bar 1.717->1.724 (0) send 1.978 door 1.987 resp 2.012 cb 2.029 done 2.066  educe_0/sdsc_add_0/bundle.mlir
+ 6    111 COMPUTE q19  B sched 2.042 bar 2.092->2.099 (0) send 2.163 door 2.172 resp 2.198 cb 2.219 done 2.302  dma_d2h_compute_0
+ 7    112 COMPUTE q20  - sched 2.278 bar 2.284->2.331 (0) send 2.364 door 2.384 resp 2.407 cb 2.428 done 2.453  p2p_rdma_wait
+ 8    113 COMPUTE q21  B sched 2.412 bar 2.481->2.488 (0) send 2.519 door 2.527 resp 2.545 cb 2.629 done 2.722  [WS 2.0] comms_ws_end
+ 9    114 ASYNC_D q66  - sched 2.559 bar 2.575->2.697 (8) send 2.832 door 2.839 resp 2.859 cb 2.889 done 2.929  dma_h2d_0
+10    115 COMPUTE q22  B sched 2.871 bar 2.964->2.994 (1) send 3.138 door 3.149 resp 3.177 cb 3.197 done 3.278  1_fused_add_sjanuyykodeejjl6#2
+11    116 ASYNC_D q67  - sched 3.179 bar 3.234->3.25 (1) send 3.396 door 3.406 resp 3.437 cb 3.488 done 3.512  dma_h2d_0
+12    117 COMPUTE q23  B sched 3.444 bar 3.467->3.522 (1) send 3.763 door 3.77 resp 3.79 cb 3.868 done 3.889  1_fused_add_vuf77ama5i3hdpin#2
+13    118 ASYNC_D q29  - sched 3.817 bar 3.837->3.908 (1) send 4.024 door 4.034 resp 4.053 cb 4.101 done 4.151  dma_d2h_0
+14    119 ASYNC_D q30  - sched 4.328 bar None->None (None) send 4.392 door 4.399 resp 4.42 cb 4.465 done 4.517  dma_d2h_0
+    -0.123 Block assigned: size=256 bytes, region_id=34359738496, offset=0, remaining_free=17179868928 bytes
+    0.0 SpyreCommsWorkSchedule(UNDEFINED, id:2): new
+    0.046 SpyreCommsWorkSchedule(UNDEFINED, id:2): allocDev(512 bytes, reason:"temp_OFF_R0_T0")
+    0.123 Block assigned: size=512 bytes, region_id=34359738496, offset=256, remaining_free=17179868416 bytes
+    0.198 SpyreCommsWorkSchedule(UNDEFINED, id:2): start()
+    0.227 SpyreCommsWorkSchedule(UNDEFINED, id:2): enqueuing for global slot
+    0.236 SpyreCommsWorkSchedule(UNDEFINED, id:2): acquired global slot
+    0.282 LaunchAll: WorkSchedule (2) wsi_ids=[0]
+    0.452 HDMA P2P Protocol: Begin Trace (context_id=0, work_schedule_id=2)
+    1.273 Launched WorkSchedule (2) with 2 operations
+    1.347 Block freed: address=0x0, size=512 bytes, region_id=103079215232
+    1.371 Destroying ~SpyreCommsWorkSchedule(id:0 of max:2) wsi_ids: [0] ; appended ws_ids: []
+    1.371 Destroying ~SpyreCommsWorkSchedule(id:0 of max:2) wsi_ids: [0] ; appended ws_ids: []
+    1.386 Block freed: address=0x0, size=256 bytes, region_id=85899346048
+    1.594 Block assigned: size=256 bytes, region_id=85899346048, offset=0, remaining_free=17179868928 bytes
+    1.742 RuntimeStream::synchronize() device=0 waiting for 2 in-flight ops
+    4.166 RuntimeStream::synchronize() device=0 completed after 2ms
+    4.188 Block freed: address=0x0, size=256 bytes, region_id=85899346048
+== r1
+ 0    105 ASYNC_D q65  - sched -0.704 bar -0.684->-0.677 (0) send -0.403 door -0.393 resp -0.371 cb -0.355 done -0.34  dma_h2d_0
+ 1    106 COMPUTE q14  B sched -0.28 bar -0.268->-0.239 (3) send -0.123 door -0.103 resp -0.075 cb -0.06 done -0.036  wait_tensor_udj4dou2wlaisoej#2
+ 2    107 COMPUTE q15  B sched 0.634 bar 0.653->0.658 (0) send 0.694 door 0.702 resp 0.722 cb 0.771 done 0.821  coll_data_mv_d2h_d2h_compute_0
+ 3    108 COMPUTE q16  - sched 0.864 bar 0.873->0.879 (0) send 0.959 door 0.967 resp 1.298 cb 1.407 done 1.431  hcoll_hwsid_wait p2p_rdma_wait
+ 4    109 COMPUTE q17  B sched 0.993 bar 1.037->1.045 (0) send 1.187 door 1.197 resp 1.298 cb 1.44 done 1.497  coll_data_mv_h2d_h2d_compute_0
+ 5    110 COMPUTE q18  B sched 1.214 bar 1.219->1.229 (0) send 1.565 door 1.577 resp 1.613 cb 1.662 done 1.686  educe_0/sdsc_add_0/bundle.mlir
+ 6    111 COMPUTE q19  B sched 1.602 bar 1.631->1.636 (0) send 1.744 door 1.751 resp 1.77 cb 1.847 done 1.9  dma_d2h_compute_0
+ 7    112 COMPUTE q20  - sched 1.79 bar 1.795->1.801 (0) send 1.827 door 1.921 resp 2.213 cb 2.223 done 2.245  p2p_rdma_wait
+ 8    113 COMPUTE q21  B sched 1.937 bar 1.943->1.949 (0) send 1.972 door 1.978 resp 2.213 cb 2.282 done 2.308  [WS 2.0] comms_ws_end
+ 9    114 ASYNC_D q66  - sched 1.991 bar 2.002->2.345 (8) send 2.442 door 2.449 resp 2.468 cb 2.521 done 2.587  dma_h2d_0
+10    115 COMPUTE q22  B sched 2.495 bar 2.566->2.61 (1) send 2.783 door 2.802 resp 2.817 cb 2.841 done 2.865  1_fused_add_sjanuyykodeejjl6#2
+11    116 ASYNC_D q67  - sched 2.823 bar 2.9->2.911 (1) send 2.999 door 3.011 resp 3.066 cb 3.078 done 3.102  dma_h2d_0
+12    117 COMPUTE q23  B sched 3.028 bar 3.043->3.112 (1) send 3.343 door 3.351 resp 3.37 cb 3.443 done 3.467  1_fused_add_vuf77ama5i3hdpin#2
+13    118 ASYNC_D q29  - sched 3.397 bar 3.412->3.486 (1) send 3.602 door 3.611 resp 3.651 cb 3.666 done 3.721  dma_d2h_0
+14    119 ASYNC_D q30  - sched 3.862 bar None->None (None) send 3.925 door 3.943 resp 3.98 cb 3.995 done 4.047  dma_d2h_0
+    -0.785 Block assigned: size=256 bytes, region_id=34359738496, offset=0, remaining_free=17179868928 bytes
+    -0.68 SpyreCommsWorkSchedule(UNDEFINED, id:2): new
+    -0.617 SpyreCommsWorkSchedule(UNDEFINED, id:2): allocDev(512 bytes, reason:"temp_OFF_R1_T0")
+    -0.593 Block assigned: size=512 bytes, region_id=34359738496, offset=256, remaining_free=17179868416 bytes
+    -0.554 SpyreCommsWorkSchedule(UNDEFINED, id:2): start()
+    -0.514 SpyreCommsWorkSchedule(UNDEFINED, id:2): enqueuing for global slot
+    -0.507 SpyreCommsWorkSchedule(UNDEFINED, id:2): acquired global slot
+    0.258 LaunchAll: WorkSchedule (2) wsi_ids=[0]
+    0.449 HDMA P2P Protocol: Begin Trace (context_id=0, work_schedule_id=2)
+    0.851 Launched WorkSchedule (2) with 2 operations
+    0.99 Block freed: address=0x0, size=512 bytes, region_id=103079215232
+    1.014 Destroying ~SpyreCommsWorkSchedule(id:0 of max:2) wsi_ids: [0] ; appended ws_ids: []
+    1.014 Destroying ~SpyreCommsWorkSchedule(id:0 of max:2) wsi_ids: [0] ; appended ws_ids: []
+    1.072 Block freed: address=0x0, size=256 bytes, region_id=85899346048
+    1.158 Block assigned: size=256 bytes, region_id=85899346048, offset=0, remaining_free=17179868928 bytes
+    1.366 RuntimeStream::synchronize() device=1 waiting for 3 in-flight ops
+    3.735 RuntimeStream::synchronize() device=1 completed after 2ms
+    3.755 Block freed: address=0x0, size=256 bytes, region_id=85899346048

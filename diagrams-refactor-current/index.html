@@ -1,0 +1,870 @@
+<title>Allreduce after the refactor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #F5F7FA;
+    --surface: #FFFFFF;
+    --ink: #18212C;
+    --muted: #5A6677;
+    --rule: #D3DAE3;
+    --faint: #E6EBF1;
+    --accent: #1F5FBF;
+    --wash: #E7EEF9;
+    --comms: #7A4FB5;
+    --commswash: #F1EBF9;
+    --code: #ECF0F5;
+    --ok: #1E7A4C;
+    --bad: #B4372B;
+    --badwash: #FBECEA;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper: #0F141B; --surface: #151C25; --ink: #E3E8EF; --muted: #95A1B2;
+      --rule: #2B3543; --faint: #1E2733; --accent: #74A6F2; --wash: #1A2A45; --comms: #B79AE6; --commswash: #2A2140;
+      --code: #18202B; --ok: #5CC28E; --bad: #EE8577; --badwash: #2E1A18;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #0F141B; --surface: #151C25; --ink: #E3E8EF; --muted: #95A1B2;
+    --rule: #2B3543; --faint: #1E2733; --accent: #74A6F2; --wash: #1A2A45; --comms: #B79AE6; --commswash: #2A2140;
+    --code: #18202B; --ok: #5CC28E; --bad: #EE8577; --badwash: #2E1A18;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font: 400 15px/1.6 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding-inline: 20px;
+  }
+  main { max-width: 980px; margin-inline: auto; padding-block: 48px 72px; display: grid; gap: 48px; }
+  .prose { max-width: 68ch; display: grid; gap: 10px; }
+  h1, h2, h3 { font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif; text-wrap: balance; margin: 0; }
+  h1 { font-size: 2.4rem; line-height: 1.1; font-weight: 600; letter-spacing: -0.01em; }
+  h2 { font-size: 1.35rem; font-weight: 600; }
+  h3 { font-size: 15px; font-weight: 600; }
+  p { margin: 0; }
+  .eyebrow { font: 500 12px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  header { display: grid; gap: 14px; }
+  .lede { color: var(--muted); font-size: 1.06rem; max-width: 68ch; }
+  code, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.87em; }
+  :not(pre) > code { background: var(--code); padding: 1px 5px; border-radius: 3px; }
+  pre { background: var(--code); margin: 0; padding: 16px 18px; border-radius: 6px; overflow-x: auto; line-height: 1.55; }
+  .hl { color: var(--bad); font-weight: 500; }
+  .cmt { color: var(--muted); }
+  .inferred { font: 500 10.5px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--rule); border-radius: 3px; padding: 2px 5px; vertical-align: 1px; white-space: nowrap; }
+
+  section { display: grid; gap: 14px; }
+  figure { margin: 0; display: grid; gap: 12px; }
+  .diagram { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 18px 10px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+  figcaption { color: var(--muted); font-size: 14px; max-width: 76ch; }
+  figcaption strong { color: var(--ink); font-weight: 600; }
+
+  .keys { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 13px; color: var(--muted); }
+  .keys span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 22px; height: 10px; border-radius: 2px; display: inline-block; }
+  .sw.cm { background: var(--comms); }
+  .sw.cmw { background: var(--commswash); border: 1px solid var(--comms); }
+  .sw.acc { background: var(--accent); }
+  .sw.accw { background: var(--wash); border: 1px solid var(--accent); }
+  .sw.bad { background: var(--bad); }
+  .sw.q { background: var(--faint); border: 1px solid var(--rule); }
+  .sw.s { background: var(--ink); opacity: .55; }
+  .sw.h { background: var(--rule); }
+
+  /* SVG roles */
+  .box { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; }
+  .box.flex { fill: var(--wash); stroke: var(--accent); }
+  .box.comms { fill: var(--commswash); stroke: var(--comms); }
+  .box.dim { stroke-dasharray: 4 3; }
+  .seg { fill: var(--paper); stroke: var(--rule); stroke-width: 1; }
+  .seg.dim { stroke-dasharray: 4 3; }
+  .chip { fill: var(--wash); stroke: none; }
+  .chip.cm { fill: var(--commswash); }
+  .half { fill: var(--surface); stroke: var(--comms); stroke-width: 1; }
+  .t1 { font: 600 13.5px "IBM Plex Sans", system-ui, sans-serif; fill: var(--ink); }
+  .t2 { font: 400 11.5px "IBM Plex Mono", ui-monospace, monospace; fill: var(--muted); }
+  .t3 { font: 400 11.5px "IBM Plex Mono", ui-monospace, monospace; fill: var(--ink); }
+  .lab { font: 400 11.5px "IBM Plex Sans", system-ui, sans-serif; fill: var(--ink); paint-order: stroke; stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round; }
+  .lab.acc, .t1.acc, .t3.acc { fill: var(--accent); }
+  .lab.cm, .t1.cm, .t3.cm { fill: var(--comms); }
+  .lab.mut { fill: var(--muted); }
+  .lab.bad, .t3.bad { fill: var(--bad); }
+  .time { font: 400 11px "IBM Plex Mono", ui-monospace, monospace; fill: var(--muted); }
+  .tag { font: 500 10.5px "IBM Plex Mono", ui-monospace, monospace; }
+  .tag.cm { fill: var(--comms); }
+  .tag.acc { fill: var(--accent); }
+  .edge { stroke: var(--ink); stroke-width: 1.3; fill: none; }
+  .edge.acc { stroke: var(--accent); }
+  .edge.cm { stroke: var(--comms); }
+  .edge.bad { stroke: var(--bad); stroke-width: 1.6; }
+  .edge.dash { stroke-dasharray: 5 4; }
+  .grid { stroke: var(--faint); stroke-width: 1; }
+  .lane { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 3; }
+  .lane.strong { stroke-dasharray: none; }
+  .bar { stroke-width: 1; }
+  .bar.ink { fill: var(--muted); stroke: none; }
+  .bar.cm { fill: var(--comms); stroke: var(--comms); }
+  .bar.cmw { fill: var(--commswash); stroke: var(--comms); }
+  .bar.acc { fill: var(--accent); stroke: var(--accent); }
+  .bar.accw { fill: var(--wash); stroke: var(--accent); }
+  .bar.bad { fill: var(--bad); stroke: none; }
+  .mark { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; stroke-dasharray: 2 2; }
+  .head-ink { fill: var(--ink); }
+  .head-acc { fill: var(--accent); }
+  .head-cm { fill: var(--comms); }
+  .head-bad { fill: var(--bad); }
+  .st { stroke-width: 1; }
+  .st.q { fill: var(--faint); stroke: var(--rule); }
+  .st.q.fuzzy { stroke-dasharray: 3 2; }
+  .st.s { fill: var(--ink); fill-opacity: .55; stroke: none; }
+  .st.b { fill: var(--bad); stroke: none; }
+  .st.h { fill: var(--rule); stroke: none; }
+  .badge { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; }
+  .badgen { font: 600 10.5px "IBM Plex Mono", ui-monospace, monospace; fill: var(--ink); }
+  .pushm { fill: var(--ink); }
+  .lab.inbar { stroke: none; }
+  ol.steps { display: grid; gap: 10px; padding-left: 0; list-style: none; counter-reset: s; max-width: 80ch; }
+  ol.steps li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; counter-increment: s; }
+  ol.steps li::before { content: counter(s); font: 600 11px/20px "IBM Plex Mono", ui-monospace, monospace; text-align: center; width: 20px; height: 20px; border: 1.2px solid var(--ink); border-radius: 50%; }
+  svg rect:hover { filter: brightness(0.92); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  .table-wrap { overflow-x: auto; }
+  th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font: 500 11px "IBM Plex Mono", ui-monospace, monospace; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  td.num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; white-space: nowrap; text-align: right; }
+  th.num { text-align: right; }
+  td.lbl { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; white-space: nowrap; }
+  tr.group td { font: 600 12px "IBM Plex Sans", system-ui, sans-serif; color: var(--muted); padding-top: 18px; border-bottom-color: var(--ink); }
+  tr.cm td:first-child { color: var(--comms); font-weight: 600; }
+  tr.ac td:first-child { color: var(--accent); font-weight: 600; }
+  .yes { color: var(--ink); font-weight: 600; }
+  .no { color: var(--muted); }
+
+  .finding { display: grid; gap: 12px; background: var(--badwash); border-left: 3px solid var(--bad); padding: 18px 20px; border-radius: 0 6px 6px 0; }
+  .finding p { max-width: 74ch; }
+  .finding pre { background: var(--surface); }
+
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px 36px; }
+  .figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding-block: 16px; }
+  .figures div { display: grid; gap: 2px; }
+  .figures b { font: 500 1.6rem/1.1 "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .figures span { color: var(--muted); font-size: 13px; }
+  .notes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 32px; }
+  .note { display: grid; gap: 4px; align-content: start; }
+  .note p { color: var(--muted); font-size: 14px; }
+
+  @media (max-width: 720px) {
+    h1 { font-size: 1.9rem; }
+    .notes, .split, .figures { grid-template-columns: 1fr; }
+  }
+</style>
+
+<main>
+  <header>
+    <span class="eyebrow">Companion to “Allreduce on the flex stream” · branch refactor_to_collectivekernel @ 07a30b42 · flex 93601a80b · spyre-comms 9d321cad · iteration 1 · rank 0 and rank 1</span>
+    <h1>Allreduce after the refactor</h1>
+    <p class="lede">The same two-rank <code>x * 2 → all_reduce → y + 1 → wait → +</code> graph, now lowered through <code>AllReduceKernel</code>, a <code>_CollectiveKernel</code> subclass, and <code>WaitKernel</code>. This run (4 Nov 2026) is on the branch after its merge from main, against spyre-comms and flex main from 2 Nov. The generated code is the same as on 20 Oct; spyre-comms now emits a different, shorter set of collective control blocks. All times are in milliseconds after <code>SpyreCommsWorkSchedule(id:2): new</code> at 18:58:38.722872 on rank 0. Both ranks log against the same host clock.</p>
+  </header>
+
+  <figure>
+    <h2>What Inductor generates now</h2>
+    <div class="split">
+      <pre><span class="cmt"># wrapper header, runs once at graph load</span>
+_ar_plan_buf1 = torch.ops.spyre.allreduce_plan(128, 5, 'sum', 'default')
+
+<span class="cmt"># call()</span>
+buf0 = spyre_empty_with_layout((128,), …)
+sdsc_fused_mul_0.run(arg0_1, buf7, buf0)        <span class="cmt"># x * 2</span>
+<span class="hl">torch.ops.spyre.allreduce_run(buf0, _ar_plan_buf1)</span>  <span class="cmt"># in place, no result</span>
+sdsc_fused_add_1.run(arg1_1, buf8)              <span class="cmt"># z = y + 1 → LX</span>
+<span class="hl">torch.ops.spyre.wait_work(buf0)</span>                  <span class="cmt"># no result either</span>
+buf6 = spyre_empty_with_layout((128,), …)
+sdsc_fused_add_2.run(buf0, buf6)                <span class="cmt"># reduced + z</span>
+return (buf6, )</pre>
+      <div class="prose" style="min-width:0">
+        <p><strong>No clone.</strong> <code>x * 2</code> is used only by the collective, so the reinplace pass rewrites <code>all_reduce</code> to <code>all_reduce_</code>. <code>lower_c10d_all_reduce_inplace</code> then builds a <code>NoneLayout</code> node with a <code>MutationOutput</code> on <code>buf0</code>, and the run call binds nothing. The functional lowering's <code>clone()</code> runs only when the input is read again later.</p>
+        <p><strong>Compute between run and wait.</strong> <code>y + 1</code> is now scheduled between <code>allreduce_run</code> and <code>wait_work</code>. Its result never leaves the scratchpad: <code>fused_add_1</code> writes <code>z</code> to <code>lx:0</code> and <code>fused_add_2</code> reads it from <code>lx:0</code>. Holding LX across the collective is what "Skip collectives in LX context switching" permits.</p>
+        <p><strong>The wait no longer blocks the host.</strong> On the default stream, <code>wait_work</code> hands the WorkSchedule to spyre_comms and returns, unless <code>TORCH_SPYRE_DIST_ENFORCE_WAIT=1</code>. Ordering comes from the stream alone.</p>
+      </div>
+    </div>
+  </figure>
+
+  <figure>
+    <h2>How the ops reach the device</h2>
+    <div class="diagram">
+      <svg viewBox="0 0 960 384" role="img" aria-label="The generated call() and spyre_comms both append ops to one in-order RuntimeStream, stream_id 1. The multiply's two ops go first, then allreduce_run's LaunchAll appends the seven collective ops, then y + 1, the final add and the copy to CPU are appended behind them. The RuntimeScheduler takes ops in order, inserts a host barrier when the op type changes and rings a doorbell on COMPUTE, ASYNC_DMAI or ASYNC_DMAO. The collective's DMAs use the COMPUTE queue. A ResponseWorker thread handles response blocks and resolves fences.">
+        <defs>
+          <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-ink"/></marker>
+          <marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-acc"/></marker>
+          <marker id="m3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-cm"/></marker>
+        </defs>
+        <rect class="box" x="20" y="150" width="170" height="64" rx="4"/>
+        <text class="t1" x="34" y="174">generated call()</text>
+        <text class="t2" x="34" y="193">Python thread</text>
+
+        <rect class="box comms" x="240" y="22" width="250" height="60" rx="4"/>
+        <text class="t1 cm" x="254" y="45">allreduce_run · LaunchAll</text>
+        <text class="t2" x="254" y="64">2 operations → 7 stream ops</text>
+
+        <rect class="box flex" x="240" y="110" width="250" height="248" rx="4"/>
+        <text class="t1 acc" x="254" y="133">RuntimeStream · stream_id 1</text>
+        <text class="t2" x="254" y="151">one in-order queue, ops in order</text>
+        <rect class="chip" x="254" y="164" width="222" height="20" rx="3"/>
+        <text class="t3" x="264" y="178">1  mul · H2D correction · 105</text>
+        <rect class="chip" x="254" y="187" width="222" height="20" rx="3"/>
+        <text class="t3" x="264" y="201">2  mul · compute · 106</text>
+        <rect class="chip cm" x="254" y="210" width="222" height="24" rx="3"/>
+        <text class="t3 cm" x="264" y="226">3  allreduce · 7 ops · 107–113</text>
+        <rect class="chip" x="254" y="238" width="222" height="20" rx="3"/>
+        <text class="t3" x="264" y="252">4  y + 1 · H2D + compute · 114–115</text>
+        <rect class="chip" x="254" y="261" width="222" height="20" rx="3"/>
+        <text class="t3" x="264" y="275">5  + z · H2D + compute · 116–117</text>
+        <rect class="chip" x="254" y="284" width="222" height="20" rx="3"/>
+        <text class="t3" x="264" y="298">6  D2H to CPU · 118</text>
+        <text class="t2" x="254" y="330">y + 1 sits behind the collective,</text>
+        <text class="t2" x="254" y="346">even though call() issues it first</text>
+
+        <line class="edge cm" x1="365" y1="82" x2="365" y2="108" marker-end="url(#m3)"/>
+        <text class="lab cm" x="375" y="100">appends after mul</text>
+        <line class="edge" x1="190" y1="182" x2="238" y2="182" marker-end="url(#m1)"/>
+        <text class="lab mut" x="214" y="174" text-anchor="middle">.run()</text>
+
+        <rect class="box" x="540" y="110" width="170" height="120" rx="4"/>
+        <text class="t1" x="554" y="133">RuntimeScheduler</text>
+        <text class="t2" x="554" y="152">STRICT_ORDERING</text>
+        <text class="t2" x="554" y="172">op type changed?</text>
+        <text class="t2" x="554" y="189">→ issueBarrier: wait</text>
+        <text class="t2" x="554" y="206">  for other queues'</text>
+        <text class="t2" x="554" y="223">  fences, on the host</text>
+        <line class="edge" x1="490" y1="176" x2="538" y2="176" marker-end="url(#m1)"/>
+        <text class="lab mut" x="514" y="168" text-anchor="middle">next op</text>
+
+        <rect class="box flex" x="770" y="96" width="170" height="44" rx="4"/>
+        <text class="t1" x="784" y="115">COMPUTE</text>
+        <text class="t2" x="784" y="131">pipeline 1 · q 14 → 23</text>
+        <rect class="box flex" x="770" y="152" width="170" height="44" rx="4"/>
+        <text class="t1" x="784" y="171">ASYNC_DMAI</text>
+        <text class="t2" x="784" y="187">pipeline 2 · q 65 → 67</text>
+        <rect class="box flex" x="770" y="208" width="170" height="44" rx="4"/>
+        <text class="t1" x="784" y="227">ASYNC_DMAO</text>
+        <text class="t2" x="784" y="243">pipeline 3 · q 29</text>
+        <line class="edge acc" x1="710" y1="150" x2="768" y2="118" marker-end="url(#m2)"/>
+        <line class="edge acc" x1="710" y1="170" x2="768" y2="174" marker-end="url(#m2)"/>
+        <line class="edge acc" x1="710" y1="190" x2="768" y2="230" marker-end="url(#m2)"/>
+        <text class="lab acc" x="739" y="104" text-anchor="middle">doorbell</text>
+        <text class="lab cm" x="855" y="88" text-anchor="middle">collective DMAs land here too</text>
+
+        <rect class="box" x="540" y="270" width="170" height="64" rx="4"/>
+        <text class="t1" x="554" y="293">ResponseWorker</text>
+        <text class="t2" x="554" y="312">runs the callback</text>
+        <polyline class="edge dash" points="855,252 855,302 712,302" marker-end="url(#m1)"/>
+        <text class="lab mut" x="783" y="294" text-anchor="middle">response block</text>
+        <line class="edge dash" x1="625" y1="270" x2="625" y2="232" marker-end="url(#m1)"/>
+        <text class="lab mut" x="633" y="256">fence resolved</text>
+      </svg>
+    </div>
+    <figcaption><strong>Code order and stream order now differ.</strong> In <code>call()</code>, <code>y + 1</code> comes before the wait, which is the overlap the graph asks for. On the device it still runs after all seven collective CBs, because <code>allreduce_run</code> has already put them on the same in-order stream. Before the refactor the multiply came after the collective. Now it comes first, so the collective is the thing in the way.</figcaption>
+  </figure>
+
+  <figure>
+    <h2>Stream 1, op by op</h2>
+    <div class="keys" aria-hidden="true">
+      <span><i class="sw q"></i>waiting in the stream deque (dashed: push time bounded, not logged)</span>
+      <span><i class="sw s"></i>scheduler thread working on it</span>
+      <span><i class="sw bad"></i>scheduler thread blocked in issueBarrier</span>
+      <span><i class="sw h"></i>ResponseWorker sends CB, rings doorbell</span>
+      <span><i class="sw cm"></i><i class="sw acc"></i>on the device</span>
+      <span><i class="sw cmw"></i><i class="sw accw"></i>response seen → callback done</span>
+    </div>
+    <div class="diagram">
+<svg viewBox="0 0 960 612" role="img" aria-label="Life of each op on stream 1, rank 0, iteration 1. The multiply's two ops run first and finish by 0.97 ms. allreduce_run returns at 1.27 ms, after LaunchAll has pushed seven collective ops; they run back to back on the COMPUTE queue until 2.72 ms. y + 1 is pushed behind them. Op 114, the first op of y + 1, blocks the scheduler thread on 8 compute fences from 2.58 to 2.70 ms. The graph then ping-pongs between DMAI and COMPUTE and synchronize() returns at 4.17 ms."><defs><marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-bad"/></marker></defs>
+<line class="grid" x1="235.7" y1="44" x2="235.7" y2="602"/>
+<text class="time" x="235.7" y="34" text-anchor="middle">0</text>
+<line class="grid" x1="308.1" y1="44" x2="308.1" y2="602"/>
+<text class="time" x="308.1" y="34" text-anchor="middle">0.5</text>
+<line class="grid" x1="380.4" y1="44" x2="380.4" y2="602"/>
+<text class="time" x="380.4" y="34" text-anchor="middle">1</text>
+<line class="grid" x1="452.8" y1="44" x2="452.8" y2="602"/>
+<text class="time" x="452.8" y="34" text-anchor="middle">1.5</text>
+<line class="grid" x1="525.1" y1="44" x2="525.1" y2="602"/>
+<text class="time" x="525.1" y="34" text-anchor="middle">2</text>
+<line class="grid" x1="597.5" y1="44" x2="597.5" y2="602"/>
+<text class="time" x="597.5" y="34" text-anchor="middle">2.5</text>
+<line class="grid" x1="669.8" y1="44" x2="669.8" y2="602"/>
+<text class="time" x="669.8" y="34" text-anchor="middle">3</text>
+<line class="grid" x1="742.2" y1="44" x2="742.2" y2="602"/>
+<text class="time" x="742.2" y="34" text-anchor="middle">3.5</text>
+<line class="grid" x1="814.5" y1="44" x2="814.5" y2="602"/>
+<text class="time" x="814.5" y="34" text-anchor="middle">4</text>
+<line class="grid" x1="886.9" y1="44" x2="886.9" y2="602"/>
+<text class="time" x="886.9" y="34" text-anchor="middle">4.5</text>
+<text class="time" x="12" y="34">ms</text>
+<text class="t2" x="12" y="54">stream_id 1 · op</text>
+<line class="lane" x1="12" y1="88.0" x2="948" y2="88.0"/>
+<text class="tag acc" x="12" y="80.0">105</text>
+<text class="lab" x="46" y="80.0">H2D mul correction</text>
+<rect class="st q fuzzy" x="231.4" y="70.0" width="1.5" height="12" rx="1.5"><title>105: in the stream deque from ≈-0.03 until popped at -0.028</title></rect>
+<rect class="st s" x="231.7" y="70.0" width="41.7" height="12" rx="1.5"><title>105: scheduler thread -0.028 → handoff 0.260</title></rect>
+<rect class="st h" x="273.3" y="70.0" width="5.1" height="12" rx="1.5"><title>105: handed to ResponseWorker 0.260, doorbell 0.295</title></rect>
+<rect class="bar acc" x="278.4" y="70.0" width="7.2" height="12" rx="1.5"><title>105: on device 0.295 → 0.345 (50 µs)</title></rect>
+<rect class="bar accw" x="285.6" y="70.0" width="16.8" height="12" rx="1.5"><title>105: response 0.345, callback 0.401 → 0.461</title></rect>
+<line class="lane" x1="12" y1="112.0" x2="948" y2="112.0"/>
+<text class="tag acc" x="12" y="104.0">106</text>
+<text class="lab" x="46" y="104.0">fused_mul</text>
+<rect class="st q fuzzy" x="231.4" y="94.0" width="49.3" height="12" rx="1.5"><title>106: in the stream deque from ≈-0.03 until popped at 0.311</title></rect>
+<rect class="st s" x="280.7" y="94.0" width="76.0" height="12" rx="1.5"><title>106: scheduler thread 0.311 → handoff 0.836</title></rect>
+<rect class="st b" x="282.7" y="94.0" width="22.4" height="12" rx="1.5"><title>106: issueBarrier waits 0.325 → 0.480 on 3 fence(s), the last from op 105</title></rect>
+<rect class="st h" x="356.7" y="94.0" width="6.4" height="12" rx="1.5"><title>106: handed to ResponseWorker 0.836, doorbell 0.880</title></rect>
+<rect class="bar acc" x="363.0" y="94.0" width="3.2" height="12" rx="1.5"><title>106: on device 0.880 → 0.902 (22 µs)</title></rect>
+<rect class="bar accw" x="366.2" y="94.0" width="9.3" height="12" rx="1.5"><title>106: response 0.902, callback 0.943 → 0.966</title></rect>
+<line class="lane" x1="12" y1="146.0" x2="948" y2="146.0"/>
+<text class="tag cm" x="12" y="138.0">107</text>
+<text class="lab" x="46" y="138.0">D2H 256 B</text>
+<rect class="st q fuzzy" x="352.9" y="128.0" width="36.2" height="12" rx="1.5"><title>107: in the stream deque from ≈0.81 until popped at 1.060</title></rect>
+<rect class="st s" x="389.1" y="128.0" width="8.1" height="12" rx="1.5"><title>107: scheduler thread 1.060 → handoff 1.116</title></rect>
+<rect class="st h" x="397.2" y="128.0" width="1.5" height="12" rx="1.5"><title>107: handed to ResponseWorker 1.116, doorbell 1.125</title></rect>
+<rect class="bar cm" x="398.5" y="128.0" width="2.7" height="12" rx="1.5"><title>107: on device 1.125 → 1.144 (19 µs)</title></rect>
+<rect class="bar cmw" x="401.3" y="128.0" width="14.5" height="12" rx="1.5"><title>107: response 1.144, callback 1.190 → 1.244</title></rect>
+<line class="lane" x1="12" y1="170.0" x2="948" y2="170.0"/>
+<text class="tag cm" x="12" y="162.0">108</text>
+<text class="lab" x="46" y="162.0">RDMA wait</text>
+<rect class="st q fuzzy" x="352.9" y="152.0" width="72.5" height="12" rx="1.5"><title>108: in the stream deque from ≈0.81 until popped at 1.311</title></rect>
+<rect class="st s" x="425.4" y="152.0" width="11.7" height="12" rx="1.5"><title>108: scheduler thread 1.311 → handoff 1.392</title></rect>
+<rect class="st h" x="437.1" y="152.0" width="2.0" height="12" rx="1.5"><title>108: handed to ResponseWorker 1.392, doorbell 1.406</title></rect>
+<rect class="bar cm" x="439.2" y="152.0" width="5.8" height="12" rx="1.5"><title>108: on device 1.406 → 1.446 (40 µs)</title></rect>
+<rect class="bar cmw" x="445.0" y="152.0" width="6.5" height="12" rx="1.5"><title>108: response 1.446, callback 1.471 → 1.491</title></rect>
+<line class="lane" x1="12" y1="194.0" x2="948" y2="194.0"/>
+<text class="tag cm" x="12" y="186.0">109</text>
+<text class="lab" x="46" y="186.0">H2D 512 B</text>
+<rect class="st q fuzzy" x="352.9" y="176.0" width="92.8" height="12" rx="1.5"><title>109: in the stream deque from ≈0.81 until popped at 1.451</title></rect>
+<rect class="st s" x="445.7" y="176.0" width="33.0" height="12" rx="1.5"><title>109: scheduler thread 1.451 → handoff 1.679</title></rect>
+<rect class="st h" x="478.7" y="176.0" width="1.5" height="12" rx="1.5"><title>109: handed to ResponseWorker 1.679, doorbell 1.687</title></rect>
+<rect class="bar cm" x="479.8" y="176.0" width="14.6" height="12" rx="1.5"><title>109: on device 1.687 → 1.788 (101 µs)</title></rect>
+<rect class="bar cmw" x="494.4" y="176.0" width="10.0" height="12" rx="1.5"><title>109: response 1.788, callback 1.806 → 1.857</title></rect>
+<line class="lane" x1="12" y1="218.0" x2="948" y2="218.0"/>
+<text class="tag cm" x="12" y="210.0">110</text>
+<text class="lab" x="46" y="210.0">sdsc_add_0</text>
+<rect class="st q fuzzy" x="352.9" y="200.0" width="130.2" height="12" rx="1.5"><title>110: in the stream deque from ≈0.81 until popped at 1.710</title></rect>
+<rect class="st s" x="483.2" y="200.0" width="38.8" height="12" rx="1.5"><title>110: scheduler thread 1.710 → handoff 1.978</title></rect>
+<rect class="st h" x="521.9" y="200.0" width="1.5" height="12" rx="1.5"><title>110: handed to ResponseWorker 1.978, doorbell 1.987</title></rect>
+<rect class="bar cm" x="523.2" y="200.0" width="3.6" height="12" rx="1.5"><title>110: on device 1.987 → 2.012 (25 µs)</title></rect>
+<rect class="bar cmw" x="526.9" y="200.0" width="7.8" height="12" rx="1.5"><title>110: response 2.012, callback 2.029 → 2.066</title></rect>
+<line class="lane" x1="12" y1="242.0" x2="948" y2="242.0"/>
+<text class="tag cm" x="12" y="234.0">111</text>
+<text class="lab" x="46" y="234.0">D2H 128 B</text>
+<rect class="st q fuzzy" x="352.9" y="224.0" width="178.3" height="12" rx="1.5"><title>111: in the stream deque from ≈0.81 until popped at 2.042</title></rect>
+<rect class="st s" x="531.2" y="224.0" width="17.5" height="12" rx="1.5"><title>111: scheduler thread 2.042 → handoff 2.163</title></rect>
+<rect class="st h" x="548.7" y="224.0" width="1.5" height="12" rx="1.5"><title>111: handed to ResponseWorker 2.163, doorbell 2.172</title></rect>
+<rect class="bar cm" x="550.0" y="224.0" width="3.8" height="12" rx="1.5"><title>111: on device 2.172 → 2.198 (26 µs)</title></rect>
+<rect class="bar cmw" x="553.8" y="224.0" width="15.0" height="12" rx="1.5"><title>111: response 2.198, callback 2.219 → 2.302</title></rect>
+<line class="lane" x1="12" y1="266.0" x2="948" y2="266.0"/>
+<text class="tag cm" x="12" y="258.0">112</text>
+<text class="lab" x="46" y="258.0">RDMA wait</text>
+<rect class="st q fuzzy" x="352.9" y="248.0" width="212.4" height="12" rx="1.5"><title>112: in the stream deque from ≈0.81 until popped at 2.278</title></rect>
+<rect class="st s" x="565.4" y="248.0" width="12.4" height="12" rx="1.5"><title>112: scheduler thread 2.278 → handoff 2.364</title></rect>
+<rect class="st h" x="577.8" y="248.0" width="2.9" height="12" rx="1.5"><title>112: handed to ResponseWorker 2.364, doorbell 2.384</title></rect>
+<rect class="bar cm" x="580.7" y="248.0" width="3.3" height="12" rx="1.5"><title>112: on device 2.384 → 2.407 (23 µs)</title></rect>
+<rect class="bar cmw" x="584.0" y="248.0" width="6.7" height="12" rx="1.5"><title>112: response 2.407, callback 2.428 → 2.453</title></rect>
+<line class="lane" x1="12" y1="290.0" x2="948" y2="290.0"/>
+<text class="tag cm" x="12" y="282.0">113</text>
+<text class="lab" x="46" y="282.0">comms_ws_end</text>
+<rect class="st q fuzzy" x="352.9" y="272.0" width="231.8" height="12" rx="1.5"><title>113: in the stream deque from ≈0.81 until popped at 2.412</title></rect>
+<rect class="st s" x="584.7" y="272.0" width="15.5" height="12" rx="1.5"><title>113: scheduler thread 2.412 → handoff 2.519</title></rect>
+<rect class="st h" x="600.2" y="272.0" width="1.5" height="12" rx="1.5"><title>113: handed to ResponseWorker 2.519, doorbell 2.527</title></rect>
+<rect class="bar cm" x="601.4" y="272.0" width="2.6" height="12" rx="1.5"><title>113: on device 2.527 → 2.545 (18 µs)</title></rect>
+<rect class="bar cmw" x="604.0" y="272.0" width="25.6" height="12" rx="1.5"><title>113: response 2.545, callback 2.629 → 2.722</title></rect>
+<line class="lane" x1="12" y1="324.0" x2="948" y2="324.0"/>
+<text class="tag acc" x="12" y="316.0">114</text>
+<text class="lab" x="46" y="316.0">H2D add_1 correction</text>
+<rect class="st q fuzzy" x="423.8" y="306.0" width="182.2" height="12" rx="1.5"><title>114: in the stream deque from ≈1.30 until popped at 2.559</title></rect>
+<rect class="st s" x="606.0" y="306.0" width="39.5" height="12" rx="1.5"><title>114: scheduler thread 2.559 → handoff 2.832</title></rect>
+<rect class="st b" x="608.3" y="306.0" width="17.7" height="12" rx="1.5"><title>114: issueBarrier waits 2.575 → 2.697 on 8 fence(s), the last from op 113</title></rect>
+<rect class="st h" x="645.5" y="306.0" width="1.5" height="12" rx="1.5"><title>114: handed to ResponseWorker 2.832, doorbell 2.839</title></rect>
+<rect class="bar acc" x="646.5" y="306.0" width="2.9" height="12" rx="1.5"><title>114: on device 2.839 → 2.859 (20 µs)</title></rect>
+<rect class="bar accw" x="649.4" y="306.0" width="10.1" height="12" rx="1.5"><title>114: response 2.859, callback 2.889 → 2.929</title></rect>
+<line class="lane" x1="12" y1="348.0" x2="948" y2="348.0"/>
+<text class="tag acc" x="12" y="340.0">115</text>
+<text class="lab" x="46" y="340.0">fused_add_1 (y+1)</text>
+<rect class="st q fuzzy" x="423.8" y="330.0" width="227.3" height="12" rx="1.5"><title>115: in the stream deque from ≈1.30 until popped at 2.871</title></rect>
+<rect class="st s" x="651.2" y="330.0" width="38.6" height="12" rx="1.5"><title>115: scheduler thread 2.871 → handoff 3.138</title></rect>
+<rect class="st b" x="664.6" y="330.0" width="4.3" height="12" rx="1.5"><title>115: issueBarrier waits 2.964 → 2.994 on 1 fence(s), the last from op 114</title></rect>
+<rect class="st h" x="689.8" y="330.0" width="1.6" height="12" rx="1.5"><title>115: handed to ResponseWorker 3.138, doorbell 3.149</title></rect>
+<rect class="bar acc" x="691.4" y="330.0" width="4.1" height="12" rx="1.5"><title>115: on device 3.149 → 3.177 (28 µs)</title></rect>
+<rect class="bar accw" x="695.4" y="330.0" width="14.6" height="12" rx="1.5"><title>115: response 3.177, callback 3.197 → 3.278</title></rect>
+<line class="lane" x1="12" y1="372.0" x2="948" y2="372.0"/>
+<text class="tag acc" x="12" y="364.0">116</text>
+<text class="lab" x="46" y="364.0">H2D add_2 correction</text>
+<rect class="st q fuzzy" x="452.8" y="354.0" width="243.0" height="12" rx="1.5"><title>116: in the stream deque from ≈1.50 until popped at 3.179</title></rect>
+<rect class="st s" x="695.7" y="354.0" width="31.4" height="12" rx="1.5"><title>116: scheduler thread 3.179 → handoff 3.396</title></rect>
+<rect class="st b" x="703.7" y="354.0" width="2.3" height="12" rx="1.5"><title>116: issueBarrier waits 3.234 → 3.250 on 1 fence(s), the last from op 115</title></rect>
+<rect class="st h" x="727.1" y="354.0" width="1.5" height="12" rx="1.5"><title>116: handed to ResponseWorker 3.396, doorbell 3.406</title></rect>
+<rect class="bar acc" x="728.6" y="354.0" width="4.5" height="12" rx="1.5"><title>116: on device 3.406 → 3.437 (31 µs)</title></rect>
+<rect class="bar accw" x="733.1" y="354.0" width="10.9" height="12" rx="1.5"><title>116: response 3.437, callback 3.488 → 3.512</title></rect>
+<line class="lane" x1="12" y1="396.0" x2="948" y2="396.0"/>
+<text class="tag acc" x="12" y="388.0">117</text>
+<text class="lab" x="46" y="388.0">fused_add_2</text>
+<rect class="st q fuzzy" x="452.8" y="378.0" width="281.3" height="12" rx="1.5"><title>117: in the stream deque from ≈1.50 until popped at 3.444</title></rect>
+<rect class="st s" x="734.1" y="378.0" width="46.2" height="12" rx="1.5"><title>117: scheduler thread 3.444 → handoff 3.763</title></rect>
+<rect class="st b" x="737.4" y="378.0" width="8.0" height="12" rx="1.5"><title>117: issueBarrier waits 3.467 → 3.522 on 1 fence(s), the last from op 116</title></rect>
+<rect class="st h" x="780.2" y="378.0" width="1.5" height="12" rx="1.5"><title>117: handed to ResponseWorker 3.763, doorbell 3.770</title></rect>
+<rect class="bar acc" x="781.3" y="378.0" width="2.9" height="12" rx="1.5"><title>117: on device 3.770 → 3.790 (20 µs)</title></rect>
+<rect class="bar accw" x="784.1" y="378.0" width="14.3" height="12" rx="1.5"><title>117: response 3.790, callback 3.868 → 3.889</title></rect>
+<line class="lane" x1="12" y1="420.0" x2="948" y2="420.0"/>
+<text class="tag acc" x="12" y="412.0">118</text>
+<text class="lab" x="46" y="412.0">D2H 256 B to CPU</text>
+<rect class="st q fuzzy" x="484.6" y="402.0" width="303.5" height="12" rx="1.5"><title>118: in the stream deque from ≈1.72 until popped at 3.817</title></rect>
+<rect class="st s" x="788.1" y="402.0" width="30.0" height="12" rx="1.5"><title>118: scheduler thread 3.817 → handoff 4.024</title></rect>
+<rect class="st b" x="791.0" y="402.0" width="10.3" height="12" rx="1.5"><title>118: issueBarrier waits 3.837 → 3.908 on 1 fence(s), the last from op 117</title></rect>
+<rect class="st h" x="818.0" y="402.0" width="1.5" height="12" rx="1.5"><title>118: handed to ResponseWorker 4.024, doorbell 4.034</title></rect>
+<rect class="bar acc" x="819.5" y="402.0" width="2.7" height="12" rx="1.5"><title>118: on device 4.034 → 4.053 (19 µs)</title></rect>
+<rect class="bar accw" x="822.2" y="402.0" width="14.2" height="12" rx="1.5"><title>118: response 4.053, callback 4.101 → 4.151</title></rect>
+<line class="lane strong" x1="12" y1="117.0" x2="948" y2="117.0"/>
+<line class="lane strong" x1="12" y1="295.0" x2="948" y2="295.0"/>
+<path class="edge bad" d="M293.7,82.0 C293.7,91.0 305.2,84.0 305.2,93.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M616.1,284.0 C616.1,303.0 626.0,286.0 626.0,305.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M653.8,318.0 C653.8,327.0 669.0,320.0 669.0,329.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M698.3,342.0 C698.3,351.0 706.0,344.0 706.0,353.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M740.4,366.0 C740.4,375.0 745.4,368.0 745.4,377.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M795.4,390.0 C795.4,399.0 801.2,392.0 801.2,401.0" marker-end="url(#fa)"/>
+<circle class="badge" cx="392.9" cy="100.0" r="8"/><text class="badgen" x="392.9" y="103.8" text-anchor="middle">1</text>
+<circle class="badge" cx="347.9" cy="134.0" r="8"/><text class="badgen" x="347.9" y="137.8" text-anchor="middle">2</text>
+<circle class="badge" cx="526.1" cy="182.0" r="8"/><text class="badgen" x="526.1" y="185.8" text-anchor="middle">3</text>
+<circle class="badge" cx="591.0" cy="312.0" r="8"/><text class="badgen" x="591.0" y="315.8" text-anchor="middle">4</text>
+<circle class="badge" cx="858.1" cy="408.0" r="8"/><text class="badgen" x="858.1" y="411.8" text-anchor="middle">5</text>
+<line class="lane" x1="12" y1="488.0" x2="948" y2="488.0"/>
+<text class="t1" x="12" y="466.0">Python thread</text><text class="t2" x="12" y="481.0">run · push · sync</text>
+<line class="lane" x1="12" y1="526.0" x2="948" y2="526.0"/>
+<text class="t1" x="12" y="504.0">scheduler thread</text><text class="t2" x="12" y="519.0">pops ops, barriers</text>
+<line class="lane" x1="12" y1="564.0" x2="948" y2="564.0"/>
+<text class="t1" x="12" y="542.0">ResponseWorker</text><text class="t2" x="12" y="557.0">doorbell, callbacks</text>
+<line class="lane" x1="12" y1="602.0" x2="948" y2="602.0"/>
+<text class="t1" x="12" y="580.0">device</text><text class="t2" x="12" y="595.0">doorbell → response</text>
+<line class="lane strong" x1="12" y1="442.0" x2="948" y2="442.0"/>
+<rect class="bar ink" x="235.7" y="463.0" width="40.8" height="12" rx="1.5"><title>allreduce_run: WorkSchedule new, allocDev, start(), global slot, LaunchAll</title></rect>
+<rect class="bar cmw" x="276.5" y="463.0" width="143.4" height="12" rx="1.5"><title>allreduce_run: LaunchAll records and accumulates the ops; returns at 1.273, after 107's callback</title></rect>
+<rect class="bar ink" x="419.9" y="463.0" width="67.9" height="12" rx="1.5"><title>fused_add_1.run, wait_work (returns at once), fused_add_2.run, .to('cpu')</title></rect>
+<rect class="bar accw" x="487.8" y="463.0" width="350.8" height="12" rx="1.5"><title>RuntimeStream::synchronize(): blocked until in_flight and queued reach 0</title></rect>
+<text class="lab cm inbar" x="282.5" y="473.0">allreduce_run</text>
+<text class="lab acc inbar" x="493.8" y="473.0">synchronize() blocks</text>
+<path class="pushm" d="M227.4,462.0 L235.4,462.0 L231.4,455.0 z"/>
+<path class="pushm" d="M348.9,462.0 L356.9,462.0 L352.9,455.0 z"/>
+<path class="pushm" d="M419.8,462.0 L427.8,462.0 L423.8,455.0 z"/>
+<path class="pushm" d="M448.8,462.0 L456.8,462.0 L452.8,455.0 z"/>
+<path class="pushm" d="M480.6,462.0 L488.6,462.0 L484.6,455.0 z"/>
+<rect class="st s" x="231.7" y="501.0" width="41.7" height="12" rx="1.5"><title>105: scheduler thread</title></rect>
+<rect class="st s" x="280.7" y="501.0" width="76.0" height="12" rx="1.5"><title>106: scheduler thread</title></rect>
+<rect class="st b" x="282.7" y="501.0" width="22.4" height="12" rx="1.5"><title>106: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="389.1" y="501.0" width="8.1" height="12" rx="1.5"><title>107: scheduler thread</title></rect>
+<rect class="st s" x="425.4" y="501.0" width="11.7" height="12" rx="1.5"><title>108: scheduler thread</title></rect>
+<rect class="st s" x="445.7" y="501.0" width="33.0" height="12" rx="1.5"><title>109: scheduler thread</title></rect>
+<rect class="st s" x="483.2" y="501.0" width="38.8" height="12" rx="1.5"><title>110: scheduler thread</title></rect>
+<rect class="st s" x="531.2" y="501.0" width="17.5" height="12" rx="1.5"><title>111: scheduler thread</title></rect>
+<rect class="st s" x="565.4" y="501.0" width="12.4" height="12" rx="1.5"><title>112: scheduler thread</title></rect>
+<rect class="st s" x="584.7" y="501.0" width="15.5" height="12" rx="1.5"><title>113: scheduler thread</title></rect>
+<rect class="st s" x="606.0" y="501.0" width="39.5" height="12" rx="1.5"><title>114: scheduler thread</title></rect>
+<rect class="st b" x="608.3" y="501.0" width="17.7" height="12" rx="1.5"><title>114: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="651.2" y="501.0" width="38.6" height="12" rx="1.5"><title>115: scheduler thread</title></rect>
+<rect class="st b" x="664.6" y="501.0" width="4.3" height="12" rx="1.5"><title>115: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="695.7" y="501.0" width="31.4" height="12" rx="1.5"><title>116: scheduler thread</title></rect>
+<rect class="st b" x="703.7" y="501.0" width="2.3" height="12" rx="1.5"><title>116: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="734.1" y="501.0" width="46.2" height="12" rx="1.5"><title>117: scheduler thread</title></rect>
+<rect class="st b" x="737.4" y="501.0" width="8.0" height="12" rx="1.5"><title>117: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="788.1" y="501.0" width="30.0" height="12" rx="1.5"><title>118: scheduler thread</title></rect>
+<rect class="st b" x="791.0" y="501.0" width="10.3" height="12" rx="1.5"><title>118: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st h" x="273.3" y="539.0" width="5.1" height="12" rx="1.5"><title>105: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="285.6" y="539.0" width="16.8" height="12" rx="1.5"><title>105: response → callback done</title></rect>
+<rect class="st h" x="356.7" y="539.0" width="6.4" height="12" rx="1.5"><title>106: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="366.2" y="539.0" width="9.3" height="12" rx="1.5"><title>106: response → callback done</title></rect>
+<rect class="st h" x="397.2" y="539.0" width="1.5" height="12" rx="1.5"><title>107: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="401.3" y="539.0" width="14.5" height="12" rx="1.5"><title>107: response → callback done</title></rect>
+<rect class="st h" x="437.1" y="539.0" width="2.0" height="12" rx="1.5"><title>108: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="445.0" y="539.0" width="6.5" height="12" rx="1.5"><title>108: response → callback done</title></rect>
+<rect class="st h" x="478.7" y="539.0" width="1.5" height="12" rx="1.5"><title>109: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="494.4" y="539.0" width="10.0" height="12" rx="1.5"><title>109: response → callback done</title></rect>
+<rect class="st h" x="521.9" y="539.0" width="1.5" height="12" rx="1.5"><title>110: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="526.9" y="539.0" width="7.8" height="12" rx="1.5"><title>110: response → callback done</title></rect>
+<rect class="st h" x="548.7" y="539.0" width="1.5" height="12" rx="1.5"><title>111: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="553.8" y="539.0" width="15.0" height="12" rx="1.5"><title>111: response → callback done</title></rect>
+<rect class="st h" x="577.8" y="539.0" width="2.9" height="12" rx="1.5"><title>112: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="584.0" y="539.0" width="6.7" height="12" rx="1.5"><title>112: response → callback done</title></rect>
+<rect class="st h" x="600.2" y="539.0" width="1.5" height="12" rx="1.5"><title>113: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="604.0" y="539.0" width="25.6" height="12" rx="1.5"><title>113: response → callback done</title></rect>
+<rect class="st h" x="645.5" y="539.0" width="1.5" height="12" rx="1.5"><title>114: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="649.4" y="539.0" width="10.1" height="12" rx="1.5"><title>114: response → callback done</title></rect>
+<rect class="st h" x="689.8" y="539.0" width="1.6" height="12" rx="1.5"><title>115: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="695.4" y="539.0" width="14.6" height="12" rx="1.5"><title>115: response → callback done</title></rect>
+<rect class="st h" x="727.1" y="539.0" width="1.5" height="12" rx="1.5"><title>116: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="733.1" y="539.0" width="10.9" height="12" rx="1.5"><title>116: response → callback done</title></rect>
+<rect class="st h" x="780.2" y="539.0" width="1.5" height="12" rx="1.5"><title>117: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="784.1" y="539.0" width="14.3" height="12" rx="1.5"><title>117: response → callback done</title></rect>
+<rect class="st h" x="818.0" y="539.0" width="1.5" height="12" rx="1.5"><title>118: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="822.2" y="539.0" width="14.2" height="12" rx="1.5"><title>118: response → callback done</title></rect>
+<rect class="bar acc" x="278.4" y="577.0" width="7.2" height="12" rx="1.5"><title>105: on device</title></rect>
+<rect class="bar acc" x="363.0" y="577.0" width="3.2" height="12" rx="1.5"><title>106: on device</title></rect>
+<rect class="bar cm" x="398.5" y="577.0" width="2.7" height="12" rx="1.5"><title>107: on device</title></rect>
+<rect class="bar cm" x="439.2" y="577.0" width="5.8" height="12" rx="1.5"><title>108: on device</title></rect>
+<rect class="bar cm" x="479.8" y="577.0" width="14.6" height="12" rx="1.5"><title>109: on device</title></rect>
+<rect class="bar cm" x="523.2" y="577.0" width="3.6" height="12" rx="1.5"><title>110: on device</title></rect>
+<rect class="bar cm" x="550.0" y="577.0" width="3.8" height="12" rx="1.5"><title>111: on device</title></rect>
+<rect class="bar cm" x="580.7" y="577.0" width="3.3" height="12" rx="1.5"><title>112: on device</title></rect>
+<rect class="bar cm" x="601.4" y="577.0" width="2.6" height="12" rx="1.5"><title>113: on device</title></rect>
+<rect class="bar acc" x="646.5" y="577.0" width="2.9" height="12" rx="1.5"><title>114: on device</title></rect>
+<rect class="bar acc" x="691.4" y="577.0" width="4.1" height="12" rx="1.5"><title>115: on device</title></rect>
+<rect class="bar acc" x="728.6" y="577.0" width="4.5" height="12" rx="1.5"><title>116: on device</title></rect>
+<rect class="bar acc" x="781.3" y="577.0" width="2.9" height="12" rx="1.5"><title>117: on device</title></rect>
+<rect class="bar acc" x="819.5" y="577.0" width="2.7" height="12" rx="1.5"><title>118: on device</title></rect>
+</svg>
+    </div>
+    <figcaption><strong>The collective is now in the middle of the stream.</strong> Each row is one stream op, purple for the collective and blue for the graph. The Python thread pushes ops (▲). The scheduler thread pops them in order. The ResponseWorker rings doorbells and runs callbacks. Red arrows run from the callback that resolves a fence to the barrier waiting on it. Hover any bar for exact times.</figcaption>
+    <ol class="steps">
+      <li><span><strong>0–0.97 ms · x * 2.</strong> The multiply's correction (105, ASYNC_DMAI) and compute (106, COMPUTE) run first. 106's barrier collects three DMAI fences and waits 0.16 ms for them.</span></li>
+      <li><span><strong>0–1.27 ms · allreduce_run.</strong> spyre_comms takes the global slot at 0.24 ms and starts LaunchAll at 0.28 ms. Rank 1 is already there: it started this WorkSchedule 0.68 ms earlier. LaunchAll appends the seven collective ops, and <code>allreduce_run</code> returns at 1.27 ms, right after 107's callback.</span></li>
+      <li><span><strong>1.13–2.72 ms · seven CBs, no stall.</strong> The collective's CBs go to the COMPUTE queue one after another. Each is on the device for 18–101 µs. Rank 1's data is already in staging, so rank 0's RDMA waits (108, 112) clear in 40 and 23 µs.</span></li>
+      <li><span><strong>2.58–2.70 ms · y + 1 waits on eight fences.</strong> 114 is an H2D after a run of COMPUTE-queue ops, so <code>STRICT_ORDERING</code> blocks the scheduler thread until every compute fence resolves. Those are the seven collective CBs plus 106; the last is 113's callback. The wait is 0.12 ms, because nothing is stuck.</span></li>
+      <li><span><strong>2.84–4.52 ms · ping-pong.</strong> The graph ops alternate DMAI and COMPUTE, so each pays a one-fence barrier. 118's callback empties the stream and <code>synchronize()</code> returns at 4.17 ms. (119 is the driver's own <code>x.to("cpu")</code> check, left out.)</span></li>
+    </ol>
+  </figure>
+
+  <figure>
+    <h2>Iteration 1, every control block, to scale</h2>
+    <div class="keys" aria-hidden="true">
+      <span><i class="sw cm"></i>collective CB on device</span>
+      <span><i class="sw cmw"></i>collective CB, host callback still running</span>
+      <span><i class="sw acc"></i>graph CB on device</span>
+      <span><i class="sw accw"></i>graph CB, host callback still running</span>
+      <span><i class="sw bad"></i>barrier that delays y + 1</span>
+    </div>
+    <div class="diagram">
+<svg viewBox="0 0 960 540" role="img" aria-label="To-scale timeline of iteration 1. On rank 0 the multiply runs from 0.29 to 0.97 ms. The 7 collective control blocks go to the COMPUTE queue between 1.12 and 2.72 ms. y + 1 starts at 2.84 ms, after a host barrier on 8 compute fences, then the final add and the copy to the CPU finish at 4.15 ms. Rank 1 runs the same 14 control blocks, starting 0.68 ms earlier; its two RDMA waits take 331 and 292 µs.">
+<line class="grid" x1="178.1" y1="44" x2="178.1" y2="482"/>
+<text class="time" x="178.1" y="34" text-anchor="middle">-0.5</text>
+<line class="grid" x1="249.5" y1="44" x2="249.5" y2="482"/>
+<text class="time" x="249.5" y="34" text-anchor="middle">0</text>
+<line class="grid" x1="320.8" y1="44" x2="320.8" y2="482"/>
+<text class="time" x="320.8" y="34" text-anchor="middle">0.5</text>
+<line class="grid" x1="392.2" y1="44" x2="392.2" y2="482"/>
+<text class="time" x="392.2" y="34" text-anchor="middle">1</text>
+<line class="grid" x1="463.5" y1="44" x2="463.5" y2="482"/>
+<text class="time" x="463.5" y="34" text-anchor="middle">1.5</text>
+<line class="grid" x1="534.9" y1="44" x2="534.9" y2="482"/>
+<text class="time" x="534.9" y="34" text-anchor="middle">2</text>
+<line class="grid" x1="606.2" y1="44" x2="606.2" y2="482"/>
+<text class="time" x="606.2" y="34" text-anchor="middle">2.5</text>
+<line class="grid" x1="677.6" y1="44" x2="677.6" y2="482"/>
+<text class="time" x="677.6" y="34" text-anchor="middle">3</text>
+<line class="grid" x1="748.9" y1="44" x2="748.9" y2="482"/>
+<text class="time" x="748.9" y="34" text-anchor="middle">3.5</text>
+<line class="grid" x1="820.3" y1="44" x2="820.3" y2="482"/>
+<text class="time" x="820.3" y="34" text-anchor="middle">4</text>
+<line class="grid" x1="891.6" y1="44" x2="891.6" y2="482"/>
+<text class="time" x="891.6" y="34" text-anchor="middle">4.5</text>
+<text class="time" x="16" y="34">ms</text>
+<text class="t1" x="16" y="70">Python thread</text>
+<text class="t2" x="16" y="86">call() on rank 0</text>
+<text class="t1 cm" x="16" y="116">spyre_comms</text>
+<text class="t2" x="16" y="132">WorkSchedule id 2</text>
+<text class="t1" x="16" y="162">flex scheduler</text>
+<text class="t2" x="16" y="178">host barrier waits</text>
+<text class="t1" x="16" y="208">COMPUTE</text>
+<text class="t2" x="16" y="224">queue 14 → 23</text>
+<text class="t1" x="16" y="280">ASYNC_DMAI</text>
+<text class="t2" x="16" y="296">queue 65 → 67</text>
+<text class="t1" x="16" y="326">ASYNC_DMAO</text>
+<text class="t2" x="16" y="342">queue 29</text>
+<text class="t1" x="16" y="382">Rank 1</text>
+<text class="t2" x="16" y="398">all three queues</text>
+<line class="lane" x1="16" y1="90" x2="944" y2="90"/>
+<line class="lane" x1="16" y1="136" x2="944" y2="136"/>
+<line class="lane" x1="16" y1="182" x2="944" y2="182"/>
+<line class="lane" x1="16" y1="254" x2="944" y2="254"/>
+<line class="lane" x1="16" y1="300" x2="944" y2="300"/>
+<line class="lane" x1="16" y1="346" x2="944" y2="346"/>
+<line class="lane strong" x1="16" y1="352" x2="944" y2="352"/>
+<rect class="bar cmw" x="249.5" y="74" width="181.7" height="14" rx="2"><title>allreduce_run: 0 → 1.273 ms</title></rect>
+<text class="lab cm" x="249.5" y="69" text-anchor="start">allreduce_run</text>
+<rect class="bar ink" x="431.1" y="74" width="66.9" height="14" rx="2"><title>y + 1, wait_work, add_2, .to(cpu): 1.273 → 1.742 ms</title></rect>
+<rect class="bar accw" x="498.1" y="74" width="345.9" height="14" rx="2"><title>RuntimeStream::synchronize(): 1.742 → 4.166 ms</title></rect>
+<text class="lab acc" x="844.0" y="69" text-anchor="end">synchronize()</text>
+<path class="mark" d="M464.6,74 l5,7 l-5,7 l-5,-7 z"><title>wait_work(buf0): returns without blocking (default stream, TORCH_SPYRE_DIST_ENFORCE_WAIT unset); exact time not logged</title></path>
+<rect class="bar cm" x="249.5" y="120" width="33.7" height="14" rx="2"><title>WorkSchedule new → acquired global slot: 0 → 0.236 ms</title></rect>
+<rect class="bar cm" x="289.7" y="120" width="141.4" height="14" rx="2"><title>LaunchAll → Launched WorkSchedule: 0.282 → 1.273 ms</title></rect>
+<text class="lab cm" x="289.7" y="115" text-anchor="start">LaunchAll → Launched</text>
+<text class="lab cm" x="439.1" y="131">rank 1 started at -0.68</text>
+<rect class="bar ink" x="295.9" y="166" width="22.1" height="14" rx="2"><title>issueBarrier for 106: 0.325 → 0.480 ms, 3 fence(s)</title></rect>
+<rect class="bar bad" x="616.9" y="166" width="17.4" height="14" rx="2"><title>issueBarrier for 114: 2.575 → 2.697 ms, 8 fence(s)</title></rect>
+<text class="lab bad" x="610.9" y="177" text-anchor="end">y + 1 waits on 8 compute fences</text>
+<rect class="bar ink" x="672.4" y="166" width="4.3" height="14" rx="2"><title>issueBarrier for 115: 2.964 → 2.994 ms, 1 fence(s)</title></rect>
+<rect class="bar ink" x="711.0" y="166" width="2.3" height="14" rx="2"><title>issueBarrier for 116: 3.234 → 3.250 ms, 1 fence(s)</title></rect>
+<rect class="bar ink" x="744.2" y="166" width="7.8" height="14" rx="2"><title>issueBarrier for 117: 3.467 → 3.522 ms, 1 fence(s)</title></rect>
+<rect class="bar ink" x="797.0" y="166" width="10.1" height="14" rx="2"><title>issueBarrier for 118: 3.837 → 3.908 ms, 1 fence(s)</title></rect>
+<text class="lab mut" x="324.0" y="177">106: 3 fences</text>
+<rect class="bar accw" x="291.6" y="284" width="23.7" height="12" rx="2"><title>tag 105 · H2D 256 B · mul program correction · doorbell 0.295, callback done 0.461 ms</title></rect>
+<rect class="bar acc" x="291.6" y="284" width="7.1" height="12" rx="2"><title>tag 105: on device 0.295 → 0.345 ms</title></rect>
+<text class="tag acc" x="291.6" y="280">105</text>
+<rect class="bar accw" x="375.1" y="210" width="12.3" height="12" rx="2"><title>tag 106 · fused_mul compute (x * 2 → buf0) · doorbell 0.880, callback done 0.966 ms</title></rect>
+<rect class="bar acc" x="375.1" y="210" width="3.1" height="12" rx="2"><title>tag 106: on device 0.880 → 0.902 ms</title></rect>
+<text class="tag acc" x="375.1" y="206">106</text>
+<rect class="bar cmw" x="410.0" y="228" width="17.0" height="12" rx="2"><title>tag 107 · D2H 256 B · own contribution to staging · doorbell 1.125, callback done 1.244 ms</title></rect>
+<rect class="bar cm" x="410.0" y="228" width="2.7" height="12" rx="2"><title>tag 107: on device 1.125 → 1.144 ms</title></rect>
+<text class="tag cm" x="410.0" y="251">107</text>
+<rect class="bar cmw" x="450.1" y="210" width="12.1" height="12" rx="2"><title>tag 108 · p2p_rdma_wait (hwsid) · first peer mask · doorbell 1.406, callback done 1.491 ms</title></rect>
+<rect class="bar cm" x="450.1" y="210" width="5.7" height="12" rx="2"><title>tag 108: on device 1.406 → 1.446 ms</title></rect>
+<text class="tag cm" x="450.1" y="206">108</text>
+<rect class="bar cmw" x="490.2" y="228" width="24.3" height="12" rx="2"><title>tag 109 · H2D 512 B · both halves · doorbell 1.687, callback done 1.857 ms</title></rect>
+<rect class="bar cm" x="490.2" y="228" width="14.4" height="12" rx="2"><title>tag 109: on device 1.687 → 1.788 ms</title></rect>
+<text class="tag cm" x="490.2" y="251">109</text>
+<rect class="bar cmw" x="533.0" y="210" width="11.3" height="12" rx="2"><title>tag 110 · sdsc_add_0 compute · doorbell 1.987, callback done 2.066 ms</title></rect>
+<rect class="bar cm" x="533.0" y="210" width="3.6" height="12" rx="2"><title>tag 110: on device 1.987 → 2.012 ms</title></rect>
+<text class="tag cm" x="533.0" y="206">110</text>
+<rect class="bar cmw" x="559.4" y="228" width="18.6" height="12" rx="2"><title>tag 111 · D2H 128 B · seg 3 message · doorbell 2.172, callback done 2.302 ms</title></rect>
+<rect class="bar cm" x="559.4" y="228" width="3.7" height="12" rx="2"><title>tag 111: on device 2.172 → 2.198 ms</title></rect>
+<text class="tag cm" x="559.4" y="251">111</text>
+<rect class="bar cmw" x="589.7" y="210" width="9.8" height="12" rx="2"><title>tag 112 · p2p_rdma_wait · second peer mask · doorbell 2.384, callback done 2.453 ms</title></rect>
+<rect class="bar cm" x="589.7" y="210" width="3.3" height="12" rx="2"><title>tag 112: on device 2.384 → 2.407 ms</title></rect>
+<text class="tag cm" x="589.7" y="206">112</text>
+<rect class="bar cmw" x="610.1" y="228" width="27.8" height="12" rx="2"><title>tag 113 · comms_ws_end · barrier · doorbell 2.527, callback done 2.722 ms</title></rect>
+<rect class="bar cm" x="610.1" y="228" width="2.6" height="12" rx="2"><title>tag 113: on device 2.527 → 2.545 ms</title></rect>
+<text class="tag cm" x="610.1" y="251">113</text>
+<rect class="bar accw" x="654.6" y="284" width="12.8" height="12" rx="2"><title>tag 114 · H2D 256 B · add_1 correction · doorbell 2.839, callback done 2.929 ms</title></rect>
+<rect class="bar acc" x="654.6" y="284" width="2.9" height="12" rx="2"><title>tag 114: on device 2.839 → 2.859 ms</title></rect>
+<text class="tag acc" x="654.6" y="280">114</text>
+<rect class="bar accw" x="698.8" y="210" width="18.4" height="12" rx="2"><title>tag 115 · fused_add_1 compute (y + 1 → LX) · doorbell 3.149, callback done 3.278 ms</title></rect>
+<rect class="bar acc" x="698.8" y="210" width="4.0" height="12" rx="2"><title>tag 115: on device 3.149 → 3.177 ms</title></rect>
+<text class="tag acc" x="698.8" y="206">115</text>
+<rect class="bar accw" x="735.5" y="284" width="15.1" height="12" rx="2"><title>tag 116 · H2D 256 B · add_2 correction · doorbell 3.406, callback done 3.512 ms</title></rect>
+<rect class="bar acc" x="735.5" y="284" width="4.4" height="12" rx="2"><title>tag 116: on device 3.406 → 3.437 ms</title></rect>
+<text class="tag acc" x="735.5" y="280">116</text>
+<rect class="bar accw" x="787.5" y="228" width="17.0" height="12" rx="2"><title>tag 117 · fused_add_2 compute (buf0 + z) · doorbell 3.770, callback done 3.889 ms</title></rect>
+<rect class="bar acc" x="787.5" y="228" width="2.9" height="12" rx="2"><title>tag 117: on device 3.770 → 3.790 ms</title></rect>
+<text class="tag acc" x="787.5" y="251">117</text>
+<rect class="bar accw" x="825.1" y="330" width="16.7" height="12" rx="2"><title>tag 118 · D2H 256 B · result to CPU · doorbell 4.034, callback done 4.151 ms</title></rect>
+<rect class="bar acc" x="825.1" y="330" width="2.7" height="12" rx="2"><title>tag 118: on device 4.034 → 4.053 ms</title></rect>
+<text class="tag acc" x="825.1" y="326">118</text>
+<rect class="bar accw" x="193.4" y="384" width="7.6" height="12" rx="2"><title>Rank 1 tag 105 · H2D 256 B · mul program correction · doorbell -0.393, callback done -0.340 ms</title></rect>
+<rect class="bar acc" x="193.4" y="384" width="3.1" height="12" rx="2"><title>tag 105: on device -0.393 → -0.371 ms</title></rect>
+<text class="tag acc" x="193.4" y="380">105</text>
+<rect class="bar accw" x="234.8" y="402" width="9.6" height="12" rx="2"><title>Rank 1 tag 106 · fused_mul compute (x * 2 → buf0) · doorbell -0.103, callback done -0.036 ms</title></rect>
+<rect class="bar acc" x="234.8" y="402" width="4.0" height="12" rx="2"><title>tag 106: on device -0.103 → -0.075 ms</title></rect>
+<text class="tag acc" x="234.8" y="425">106</text>
+<rect class="bar cmw" x="349.7" y="384" width="17.0" height="12" rx="2"><title>Rank 1 tag 107 · D2H 256 B · own contribution to staging · doorbell 0.702, callback done 0.821 ms</title></rect>
+<rect class="bar cm" x="349.7" y="384" width="2.9" height="12" rx="2"><title>tag 107: on device 0.702 → 0.722 ms</title></rect>
+<text class="tag cm" x="349.7" y="380">107</text>
+<rect class="bar cmw" x="387.5" y="402" width="66.2" height="12" rx="2"><title>Rank 1 tag 108 · p2p_rdma_wait (hwsid) · first peer mask · doorbell 0.967, callback done 1.431 ms</title></rect>
+<rect class="bar cm" x="387.5" y="402" width="47.2" height="12" rx="2"><title>tag 108: on device 0.967 → 1.298 ms</title></rect>
+<text class="tag cm" x="387.5" y="425">108</text>
+<rect class="bar cmw" x="420.3" y="384" width="42.8" height="12" rx="2"><title>Rank 1 tag 109 · H2D 512 B · both halves · doorbell 1.197, callback done 1.497 ms</title></rect>
+<rect class="bar cm" x="420.3" y="384" width="14.4" height="12" rx="2"><title>tag 109: on device 1.197 → 1.298 ms</title></rect>
+<text class="tag cm" x="420.3" y="380">109</text>
+<rect class="bar cmw" x="474.5" y="402" width="15.6" height="12" rx="2"><title>Rank 1 tag 110 · sdsc_add_0 compute · doorbell 1.577, callback done 1.686 ms</title></rect>
+<rect class="bar cm" x="474.5" y="402" width="5.1" height="12" rx="2"><title>tag 110: on device 1.577 → 1.613 ms</title></rect>
+<text class="tag cm" x="474.5" y="425">110</text>
+<rect class="bar cmw" x="499.4" y="384" width="21.3" height="12" rx="2"><title>Rank 1 tag 111 · D2H 128 B · seg 3 message · doorbell 1.751, callback done 1.900 ms</title></rect>
+<rect class="bar cm" x="499.4" y="384" width="2.7" height="12" rx="2"><title>tag 111: on device 1.751 → 1.770 ms</title></rect>
+<text class="tag cm" x="499.4" y="380">111</text>
+<rect class="bar cmw" x="523.6" y="402" width="46.2" height="12" rx="2"><title>Rank 1 tag 112 · p2p_rdma_wait · second peer mask · doorbell 1.921, callback done 2.245 ms</title></rect>
+<rect class="bar cm" x="523.6" y="402" width="41.7" height="12" rx="2"><title>tag 112: on device 1.921 → 2.213 ms</title></rect>
+<text class="tag cm" x="523.6" y="425">112</text>
+<rect class="bar cmw" x="531.7" y="384" width="47.1" height="12" rx="2"><title>Rank 1 tag 113 · comms_ws_end · barrier · doorbell 1.978, callback done 2.308 ms</title></rect>
+<rect class="bar cm" x="531.7" y="384" width="33.5" height="12" rx="2"><title>tag 113: on device 1.978 → 2.213 ms</title></rect>
+<text class="tag cm" x="531.7" y="380">113</text>
+<rect class="bar accw" x="599.0" y="402" width="19.7" height="12" rx="2"><title>Rank 1 tag 114 · H2D 256 B · add_1 correction · doorbell 2.449, callback done 2.587 ms</title></rect>
+<rect class="bar acc" x="599.0" y="402" width="2.7" height="12" rx="2"><title>tag 114: on device 2.449 → 2.468 ms</title></rect>
+<text class="tag acc" x="599.0" y="425">114</text>
+<rect class="bar accw" x="649.3" y="384" width="9.0" height="12" rx="2"><title>Rank 1 tag 115 · fused_add_1 compute (y + 1 → LX) · doorbell 2.802, callback done 2.865 ms</title></rect>
+<rect class="bar acc" x="649.3" y="384" width="2.1" height="12" rx="2"><title>tag 115: on device 2.802 → 2.817 ms</title></rect>
+<text class="tag acc" x="649.3" y="380">115</text>
+<rect class="bar accw" x="679.2" y="402" width="13.0" height="12" rx="2"><title>Rank 1 tag 116 · H2D 256 B · add_2 correction · doorbell 3.011, callback done 3.102 ms</title></rect>
+<rect class="bar acc" x="679.2" y="402" width="7.8" height="12" rx="2"><title>tag 116: on device 3.011 → 3.066 ms</title></rect>
+<text class="tag acc" x="679.2" y="425">116</text>
+<rect class="bar accw" x="727.7" y="384" width="16.6" height="12" rx="2"><title>Rank 1 tag 117 · fused_add_2 compute (buf0 + z) · doorbell 3.351, callback done 3.467 ms</title></rect>
+<rect class="bar acc" x="727.7" y="384" width="2.7" height="12" rx="2"><title>tag 117: on device 3.351 → 3.370 ms</title></rect>
+<text class="tag acc" x="727.7" y="380">117</text>
+<rect class="bar accw" x="764.8" y="402" width="15.7" height="12" rx="2"><title>Rank 1 tag 118 · D2H 256 B · result to CPU · doorbell 3.611, callback done 3.721 ms</title></rect>
+<rect class="bar acc" x="764.8" y="402" width="5.7" height="12" rx="2"><title>tag 118: on device 3.611 → 3.651 ms</title></rect>
+<text class="tag acc" x="764.8" y="425">118</text>
+<path class="edge acc" d="M291.6,490 v6 H387.3 v-6"/>
+<text class="lab acc" x="339.5" y="512" text-anchor="middle">x * 2</text>
+<path class="edge cm" d="M410.0,490 v6 H637.9 v-6"/>
+<text class="lab cm" x="524.0" y="512" text-anchor="middle">allreduce · 7 CBs on COMPUTE</text>
+<path class="edge acc" d="M654.6,490 v6 H717.3 v-6"/>
+<text class="lab acc" x="685.9" y="512" text-anchor="middle">y + 1</text>
+<path class="edge acc" d="M735.5,490 v6 H804.4 v-6"/>
+<text class="lab acc" x="770.0" y="512" text-anchor="middle">+ z</text>
+<path class="edge acc" d="M825.1,490 v6 H841.8 v-6"/>
+<text class="lab acc" x="833.5" y="512" text-anchor="middle">CPU</text>
+</svg>
+    </div>
+    <figcaption><strong>The device is still idle most of the time.</strong> Each bar runs from the doorbell to the end of the host callback; the solid part runs until the device wrote its response block. Numbers are CB tags. Rank 1 now uses the same tags (105–119) on the same queues. Hover a bar for its exact times.</figcaption>
+  </figure>
+
+  <section>
+    <h2>What each control block does</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tag</th><th>CB label</th><th>Queue</th><th>Barrier bit</th><th>What it does</th><th class="num">Doorbell</th><th class="num">On device</th></tr></thead>
+        <tbody>
+          <tr class="group"><td colspan="7">sdsc_fused_mul_0.run(x, 2.0, buf0)</td></tr>
+          <tr class="ac"><td>105</td><td class="lbl">dma_h2d_0</td><td>ASYNC_DMAI 65</td><td class="no">no</td><td>256 B program correction into seg 7 at <code>0x1c00000000</code>, through the runtime-mapped page <code>0x400005445000</code>.</td><td class="num">0.295</td><td class="num">50 µs</td></tr>
+          <tr class="ac"><td>106</td><td class="lbl">fused_wait_tensor_udj4do…j#2</td><td>COMPUTE 14</td><td class="yes">yes</td><td>The multiply, booted from <code>0x1c00001080</code>. It writes <code>buf0</code> in seg 2. The kernel is named after <code>wait_tensor</code> because its provenance <code>aten_op</code> is the wait node.</td><td class="num">0.880</td><td class="num">22 µs</td></tr>
+          <tr class="group"><td colspan="7">allreduce_run(buf0) · WorkSchedule 2 · <code>AllReduce_Offload_AllGatherSum</code></td></tr>
+          <tr class="cm"><td>107</td><td class="lbl">hdma_hcoll_data_mv_d2h_d…e_0</td><td>COMPUTE 15</td><td class="yes">yes</td><td>DMAO 256 B from <code>buf0</code> (seg 2 +0x0) to host staging <code>0x400002400000</code>, slot 0. Rank 0's contribution.</td><td class="num">1.125</td><td class="num">19 µs</td></tr>
+          <tr class="cm"><td>108</td><td class="lbl">hdma_hcoll_hwsid_wait p2…ait</td><td>COMPUTE 16</td><td class="no">no</td><td>RDMA10 wait, <code>list_bitmask 32</code>, <code>sync: true</code>. Holds the queue until rank 1's half is in staging. Rank 1 waits on mask 16 here.</td><td class="num">1.406</td><td class="num">40 µs</td></tr>
+          <tr class="cm"><td>109</td><td class="lbl">hdma_hcoll_data_mv_h2d_h…e_0</td><td>COMPUTE 17</td><td class="yes">yes</td><td>DMAI 512 B: the whole staging buffer into the receive buffer <code>temp_OFF_R0_T0</code> at seg 2 +0x100.</td><td class="num">1.687</td><td class="num">101 µs</td></tr>
+          <tr class="cm"><td>110</td><td class="lbl">sdsc_add_0/bundle.mlir</td><td>COMPUTE 18</td><td class="yes">yes</td><td>The reduction kernel. Reads <code>xlat[0]</code> <code>0x800000180</code> and <code>xlat[1]</code> <code>0x800000280</code> (the two halves) and writes <code>xlat[2]</code> <code>0x800000080</code>, which is <code>buf0</code>. The 1,152 B program is already on the device.</td><td class="num">1.987</td><td class="num">25 µs</td></tr>
+          <tr class="cm"><td>111</td><td class="lbl">dma_d2h_compute_0</td><td>COMPUTE 19</td><td class="yes">yes</td><td>DMAO 128 B from seg 3 +0x80 to the message buffer <code>0x400005404000</code>.</td><td class="num">2.172</td><td class="num">26 µs</td></tr>
+          <tr class="cm"><td>112</td><td class="lbl">p2p_rdma_wait</td><td>COMPUTE 20</td><td class="no">no</td><td>RDMA10 wait, <code>list_bitmask 1</code>. Rank 1 waits on mask 2.</td><td class="num">2.384</td><td class="num">23 µs</td></tr>
+          <tr class="cm"><td>113</td><td class="lbl">comms_ws_end</td><td>COMPUTE 21</td><td class="yes">yes</td><td>Empty CB with the barrier bit. Its response marks the end of the schedule.</td><td class="num">2.527</td><td class="num">18 µs</td></tr>
+          <tr class="group"><td colspan="7">sdsc_fused_add_1.run(y, 1.0) · z stays in LX</td></tr>
+          <tr class="ac"><td>114</td><td class="lbl">dma_h2d_0</td><td>ASYNC_DMAI 66</td><td class="no">no</td><td>256 B program correction at <code>0x1c00012900</code>. Its host barrier waited on 8 compute fences, 2.58 → 2.70 ms.</td><td class="num">2.839</td><td class="num">20 µs</td></tr>
+          <tr class="ac"><td>115</td><td class="lbl">fused_add_sjanuyykodeejjl6#2</td><td>COMPUTE 22</td><td class="yes">yes</td><td><code>y + 1</code>. Writes <code>z</code> to the LX scratchpad, not to HBM.</td><td class="num">3.149</td><td class="num">28 µs</td></tr>
+          <tr class="group"><td colspan="7">sdsc_fused_add_2.run(buf0, buf6) and .to("cpu")</td></tr>
+          <tr class="ac"><td>116</td><td class="lbl">dma_h2d_0</td><td>ASYNC_DMAI 67</td><td class="no">no</td><td>256 B program correction at <code>0x1c00025200</code>.</td><td class="num">3.406</td><td class="num">31 µs</td></tr>
+          <tr class="ac"><td>117</td><td class="lbl">fused_add_vuf77ama5i3hdpin#2</td><td>COMPUTE 23</td><td class="yes">yes</td><td><code>buf0 + z</code>: reads the reduced <code>buf0</code> from HBM and <code>z</code> from LX, and writes <code>buf6</code> in seg 5.</td><td class="num">3.770</td><td class="num">20 µs</td></tr>
+          <tr class="ac"><td>118</td><td class="lbl">dma_d2h_0</td><td>ASYNC_DMAO 29</td><td class="no">no</td><td>256 B result from seg 5 to the CPU tensor. <code>synchronize()</code> returns at 4.166 ms.</td><td class="num">4.034</td><td class="num">19 µs</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="color:var(--muted);font-size:13px;max-width:80ch">"On device" is doorbell to response block. Every CB got its own response this time; none was rung behind a blocked one. Tag 119 (the driver's own <code>x.to("cpu")</code> check) is left out.</p>
+  </section>
+
+  <figure>
+    <h2>Where the 256 bytes go</h2>
+    <div class="diagram">
+      <svg viewBox="0 0 960 430" role="img" aria-label="CB 106, the multiply, writes buf0 in seg 2. CB 107 copies buf0 into slot 0 of the 512 byte host staging buffer; rank 1's half arrives in slot 1. CB 109 copies all 512 bytes into the receive buffer at seg 2 offset 0x100. CB 110, sdsc_add_0, reads both halves and writes the sum back into buf0. CB 115 writes z into the LX scratchpad and CB 117 reads buf0 and z and writes buf6 in seg 5, which CB 118 copies to the CPU.">
+        <defs>
+          <marker id="n1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-ink"/></marker>
+          <marker id="n2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-acc"/></marker>
+          <marker id="n3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-cm"/></marker>
+          <marker id="n4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-bad"/></marker>
+        </defs>
+        <text class="time" x="40" y="26">RANK 0 · DEVICE</text>
+        <text class="time" x="440" y="26">RANK 0 · HOST, PINNED BY SPYRE_COMMS</text>
+        <text class="time" x="740" y="26">RANK 1</text>
+
+        <rect class="box flex" x="40" y="44" width="300" height="60" rx="4"/>
+        <text class="t1" x="54" y="67">seg 2 +0x0 · buf0</text>
+        <text class="t2" x="54" y="86">0x800000080 · 256 B · x * 2, then the sum</text>
+
+        <rect class="box comms" x="40" y="150" width="300" height="60" rx="4"/>
+        <text class="t1 cm" x="54" y="173">sdsc_add_0 · CB 110</text>
+        <text class="t2" x="54" y="192">program 1,152 B at 0x1000000100</text>
+
+        <rect class="box comms" x="40" y="256" width="300" height="74" rx="4"/>
+        <text class="t1" x="54" y="278">seg 2 +0x100 · temp_OFF_R0_T0 · 512 B</text>
+        <rect class="half" x="54" y="290" width="134" height="28" rx="2"/>
+        <text class="t3" x="64" y="308">0x800000180 · r0</text>
+        <rect class="half" x="192" y="290" width="134" height="28" rx="2"/>
+        <text class="t3" x="202" y="308">0x800000280 · r1</text>
+
+        <rect class="box flex" x="40" y="356" width="300" height="56" rx="4"/>
+        <text class="t1" x="54" y="378">LX scratchpad · z = y + 1</text>
+        <text class="t2" x="54" y="396">115 writes it · 117 reads it · never in HBM</text>
+
+        <rect class="box" x="440" y="44" width="250" height="90" rx="4"/>
+        <text class="t1" x="454" y="67">staging · iova 0x400002400000</text>
+        <rect class="half" x="454" y="80" width="108" height="40" rx="2"/>
+        <text class="t3" x="464" y="98">+0x000</text>
+        <text class="t2" x="464" y="113">rank 0</text>
+        <rect class="half" x="568" y="80" width="108" height="40" rx="2"/>
+        <text class="t3" x="578" y="98">+0x100</text>
+        <text class="t2" x="578" y="113">rank 1</text>
+
+        <rect class="box flex" x="440" y="300" width="250" height="60" rx="4"/>
+        <text class="t1" x="454" y="323">CPU tensor · .to("cpu")</text>
+        <text class="t2" x="454" y="342">mapped at 0x400005445000 for 118</text>
+
+
+        <rect class="box dim" x="740" y="44" width="190" height="90" rx="4"/>
+        <text class="t1" x="754" y="67">rank 1 · its own buf0</text>
+        <text class="t2" x="754" y="86">its 107 → staging</text>
+        <text class="t2" x="754" y="103">iova 0x400002400100</text>
+        <text class="t2" x="754" y="120">RDMA masks 16, 2</text>
+
+        <line class="edge cm" x1="340" y1="74" x2="452" y2="96" marker-end="url(#n3)"/>
+        <text class="lab cm" x="386" y="66" text-anchor="middle">107 · D2H 256 B</text>
+
+        <line class="edge cm dash" x1="738" y1="100" x2="678" y2="100" marker-end="url(#n3)"/>
+        <text class="lab cm" x="708" y="152" text-anchor="middle">peer half arrives by RDMA;</text>
+        <text class="lab cm" x="708" y="168" text-anchor="middle">108 waits for it</text>
+        <text class="lab mut" x="708" y="184" text-anchor="middle">(inferred)</text>
+
+        <polyline class="edge cm" points="565,134 565,280 342,280" marker-end="url(#n3)"/>
+        <text class="lab cm" x="575" y="232">109 · H2D 512 B</text>
+
+        <line class="edge cm" x1="190" y1="256" x2="190" y2="212" marker-end="url(#n3)"/>
+        <text class="lab cm" x="200" y="240">reads both halves</text>
+        <line class="edge bad" x1="190" y1="150" x2="190" y2="106" marker-end="url(#n4)"/>
+        <text class="lab bad" x="200" y="134">writes the sum into buf0</text>
+
+        <polyline class="edge acc" points="342,384 400,384 400,330 438,330" marker-end="url(#n2)"/>
+        <text class="lab acc" x="350" y="376">117 + 118</text>
+      </svg>
+    </div>
+    <figcaption><strong>The collective now overwrites a temporary, not <code>x</code>.</strong> On the old page the sum landed in the graph input <code>x</code>. Now the multiply writes a fresh <code>buf0</code>, the collective reduces <code>buf0</code> in place, and <code>x</code> keeps its value. The driver read <code>x</code> back as 1.0 after each iteration. The receive buffer is allocated right after <code>buf0</code> in the same segment. The dashed arrow is inferred from the RDMA wait CB 108; the log never prints how the peer's half arrives.</figcaption>
+  </figure>
+
+  <section class="finding" aria-label="Why y + 1 still waits">
+    <span class="eyebrow" style="color:var(--bad)">Why y + 1 still cannot overlap the collective</span>
+    <h2>The graph is correct now, but the stream still serializes</h2>
+    <p>The refactor puts <code>y + 1</code> where overlap would happen, between <code>allreduce_run</code> and <code>wait_work</code>. The runtime then removes the overlap in the same two ways as before. First, <code>allreduce_run</code> appends the seven collective ops to stream 1 before <code>fused_add_1.run</code> appends its two, and the stream is in order. Second, the first of those two is an H2D after COMPUTE-queue ops, so <code>STRICT_ORDERING</code> puts a host barrier in front of it that waits for every compute fence:</p>
+    <pre><span class="cmt">+2.527  Tapping queue to 21 by writing 0x15                          # comms_ws_end, last collective CB</span>
++2.559  STRICT_ORDERING: auto-set pipeline barrier for op type 0 (previous was 3)
+<span class="hl">+2.575  PF issueBarrier ENTER: op_type=0 stream_id=1 total_fences=8 (compute=8 dmai=0 dmao=0)</span>
++2.629  IssueCallback: invoking callback for PendingRequest ID 113   <span class="cmt"># the last fence</span>
++2.697  PF issueBarrier EXIT: 8 fence(s) resolved for op_type=0 stream_id=1
++2.839  Tapping queue to 66 by writing 0x42                          <span class="cmt"># 114, y + 1's correction</span></pre>
+    <p>In this run the cost is small, 0.12 ms, because the ranks arrived close together and no RDMA wait stalled. On 20 Oct the same barrier held <code>y + 1</code> for 1.06 ms behind a stuck RDMA wait. The structure has not changed: real overlap still needs the collective and the compute on separate streams, or separate hardware queues, so that a slow RDMA wait would hold only the collective.</p>
+  </section>
+
+  <section>
+    <h2>Before and after</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Before (<code>AllReduceAsyncFallback</code>)</th><th>After (<code>AllReduceKernel</code>)</th></tr></thead>
+        <tbody>
+          <tr><td class="lbl">IR node</td><td><code>ExternKernel</code>, its own buffer, <code>get_mutation_names</code> on the input</td><td><code>_CollectiveKernel.create_inplace</code>: <code>NoneLayout</code> plus <code>MutationOutput</code></td></tr>
+          <tr><td class="lbl">Functional all_reduce</td><td>Same node as in-place; overwrote the graph input</td><td>Reinplaced when safe, otherwise <code>clone()</code> first</td></tr>
+          <tr><td class="lbl">Wait</td><td><code>WaitWorkFallback</code>, binds a new name</td><td><code>_WaitKernel.create_wait</code>, mutates its input</td></tr>
+          <tr><td class="lbl">Generated order</td><td>allreduce_run · mul · wait · add</td><td>mul · allreduce_run · y + 1 · wait · add</td></tr>
+          <tr><td class="lbl">wait_work on default stream</td><td>Blocked Python on <code>WorkSchedule.wait()</code></td><td>Returns at once unless <code>TORCH_SPYRE_DIST_ENFORCE_WAIT=1</code></td></tr>
+          <tr><td class="lbl">Barrier in front of graph op</td><td>8 compute fences, before mul</td><td>8 compute fences (7 collective + mul), before y + 1</td></tr>
+          <tr><td class="lbl">Coalesced variants</td><td>Not lowered</td><td>Decomposed into per-tensor collectives sharing one plan</td></tr>
+          <tr><td class="lbl">Reduce-scatter</td><td>Not lowered</td><td><code>ReduceScatterKernel</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="notes" aria-label="Notes">
+    <div class="note">
+      <h3>Rank skew is small in this run</h3>
+      <p>Rank 1 started the WorkSchedule 0.68 ms before rank 0, so its data was already in staging when rank 0 reached its RDMA waits. Rank 1's own waits took 331 and 292 µs instead. On 20 Oct rank 1 was 3 ms behind and rank 0's second wait sat on the device for 1.23 ms. Skew is a property of the driver, not of the refactor, and changes from run to run.</p>
+    </div>
+    <div class="note">
+      <h3>Debug logging inflates host gaps</h3>
+      <p>This run used <code>DTLOG_LEVEL=debug</code>, about 20 lines per CB. The 0.1–0.3 ms between one doorbell and the next is mostly host work and logging, so treat the absolute numbers as upper bounds.</p>
+    </div>
+    <div class="note">
+      <h3>Rank 1 is the mirror image</h3>
+      <p>It writes its contribution to staging <code>+0x100</code>, waits on RDMA masks 16 and 2, and loads its add kernel from <code>…/ops/rank_1/key_wsi_0/…</code>. Its CB tags are now the same as rank 0's.</p>
+    </div>
+    <div class="note">
+      <h3>Seven collective CBs now, not eight</h3>
+      <p>spyre-comms now sends D2H, RDMA wait, H2D of both halves, the sum, a 128 B D2H, a second RDMA wait, and <code>comms_ws_end</code>. On 20 Oct it sent D2H, an H2D/D2H swap, two RDMA waits back to back, H2D, the sum, and <code>null_op</code>. The sum now runs right after the first wait.</p>
+    </div>
+  </section>
+
+  <section class="prose">
+    <h2>Reproduce it</h2>
+    <pre><span class="cmt"># from dt-inductor/torch-spyre, with the env that has 2+ cards</span>
+../diagrams-refactor-current/reproduce.sh            <span class="cmt"># run + extract + generate + render PNGs</span>
+../diagrams-refactor-current/reproduce.sh --no-run   <span class="cmt"># regenerate from the saved logs only</span></pre>
+    <p style="color:var(--muted);font-size:14px">The driver (<code>run_ar.py</code>), the logs, the extractor (<code>extract.py</code>), the generator (<code>gen.py</code>) and the renderer (<code>render_png.py</code>) are in <code>dt-inductor/diagrams-refactor-current/</code>. Op type codes in this run: 0 H2D, 1 D2H, 3 COMPUTE, 9 P2PRdmaWait, 14 NULL op.</p>
+  </section>
+</main>

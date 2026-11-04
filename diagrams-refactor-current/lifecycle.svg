@@ -1,0 +1,237 @@
+<svg viewBox="0 0 960 612" role="img" aria-label="Life of each op on stream 1, rank 0, iteration 1. The multiply's two ops run first and finish by 0.97 ms. allreduce_run returns at 1.27 ms, after LaunchAll has pushed seven collective ops; they run back to back on the COMPUTE queue until 2.72 ms. y + 1 is pushed behind them. Op 114, the first op of y + 1, blocks the scheduler thread on 8 compute fences from 2.58 to 2.70 ms. The graph then ping-pongs between DMAI and COMPUTE and synchronize() returns at 4.17 ms."><defs><marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="head-bad"/></marker></defs>
+<line class="grid" x1="235.7" y1="44" x2="235.7" y2="602"/>
+<text class="time" x="235.7" y="34" text-anchor="middle">0</text>
+<line class="grid" x1="308.1" y1="44" x2="308.1" y2="602"/>
+<text class="time" x="308.1" y="34" text-anchor="middle">0.5</text>
+<line class="grid" x1="380.4" y1="44" x2="380.4" y2="602"/>
+<text class="time" x="380.4" y="34" text-anchor="middle">1</text>
+<line class="grid" x1="452.8" y1="44" x2="452.8" y2="602"/>
+<text class="time" x="452.8" y="34" text-anchor="middle">1.5</text>
+<line class="grid" x1="525.1" y1="44" x2="525.1" y2="602"/>
+<text class="time" x="525.1" y="34" text-anchor="middle">2</text>
+<line class="grid" x1="597.5" y1="44" x2="597.5" y2="602"/>
+<text class="time" x="597.5" y="34" text-anchor="middle">2.5</text>
+<line class="grid" x1="669.8" y1="44" x2="669.8" y2="602"/>
+<text class="time" x="669.8" y="34" text-anchor="middle">3</text>
+<line class="grid" x1="742.2" y1="44" x2="742.2" y2="602"/>
+<text class="time" x="742.2" y="34" text-anchor="middle">3.5</text>
+<line class="grid" x1="814.5" y1="44" x2="814.5" y2="602"/>
+<text class="time" x="814.5" y="34" text-anchor="middle">4</text>
+<line class="grid" x1="886.9" y1="44" x2="886.9" y2="602"/>
+<text class="time" x="886.9" y="34" text-anchor="middle">4.5</text>
+<text class="time" x="12" y="34">ms</text>
+<text class="t2" x="12" y="54">stream_id 1 · op</text>
+<line class="lane" x1="12" y1="88.0" x2="948" y2="88.0"/>
+<text class="tag acc" x="12" y="80.0">105</text>
+<text class="lab" x="46" y="80.0">H2D mul correction</text>
+<rect class="st q fuzzy" x="231.4" y="70.0" width="1.5" height="12" rx="1.5"><title>105: in the stream deque from ≈-0.03 until popped at -0.028</title></rect>
+<rect class="st s" x="231.7" y="70.0" width="41.7" height="12" rx="1.5"><title>105: scheduler thread -0.028 → handoff 0.260</title></rect>
+<rect class="st h" x="273.3" y="70.0" width="5.1" height="12" rx="1.5"><title>105: handed to ResponseWorker 0.260, doorbell 0.295</title></rect>
+<rect class="bar acc" x="278.4" y="70.0" width="7.2" height="12" rx="1.5"><title>105: on device 0.295 → 0.345 (50 µs)</title></rect>
+<rect class="bar accw" x="285.6" y="70.0" width="16.8" height="12" rx="1.5"><title>105: response 0.345, callback 0.401 → 0.461</title></rect>
+<line class="lane" x1="12" y1="112.0" x2="948" y2="112.0"/>
+<text class="tag acc" x="12" y="104.0">106</text>
+<text class="lab" x="46" y="104.0">fused_mul</text>
+<rect class="st q fuzzy" x="231.4" y="94.0" width="49.3" height="12" rx="1.5"><title>106: in the stream deque from ≈-0.03 until popped at 0.311</title></rect>
+<rect class="st s" x="280.7" y="94.0" width="76.0" height="12" rx="1.5"><title>106: scheduler thread 0.311 → handoff 0.836</title></rect>
+<rect class="st b" x="282.7" y="94.0" width="22.4" height="12" rx="1.5"><title>106: issueBarrier waits 0.325 → 0.480 on 3 fence(s), the last from op 105</title></rect>
+<rect class="st h" x="356.7" y="94.0" width="6.4" height="12" rx="1.5"><title>106: handed to ResponseWorker 0.836, doorbell 0.880</title></rect>
+<rect class="bar acc" x="363.0" y="94.0" width="3.2" height="12" rx="1.5"><title>106: on device 0.880 → 0.902 (22 µs)</title></rect>
+<rect class="bar accw" x="366.2" y="94.0" width="9.3" height="12" rx="1.5"><title>106: response 0.902, callback 0.943 → 0.966</title></rect>
+<line class="lane" x1="12" y1="146.0" x2="948" y2="146.0"/>
+<text class="tag cm" x="12" y="138.0">107</text>
+<text class="lab" x="46" y="138.0">D2H 256 B</text>
+<rect class="st q fuzzy" x="352.9" y="128.0" width="36.2" height="12" rx="1.5"><title>107: in the stream deque from ≈0.81 until popped at 1.060</title></rect>
+<rect class="st s" x="389.1" y="128.0" width="8.1" height="12" rx="1.5"><title>107: scheduler thread 1.060 → handoff 1.116</title></rect>
+<rect class="st h" x="397.2" y="128.0" width="1.5" height="12" rx="1.5"><title>107: handed to ResponseWorker 1.116, doorbell 1.125</title></rect>
+<rect class="bar cm" x="398.5" y="128.0" width="2.7" height="12" rx="1.5"><title>107: on device 1.125 → 1.144 (19 µs)</title></rect>
+<rect class="bar cmw" x="401.3" y="128.0" width="14.5" height="12" rx="1.5"><title>107: response 1.144, callback 1.190 → 1.244</title></rect>
+<line class="lane" x1="12" y1="170.0" x2="948" y2="170.0"/>
+<text class="tag cm" x="12" y="162.0">108</text>
+<text class="lab" x="46" y="162.0">RDMA wait</text>
+<rect class="st q fuzzy" x="352.9" y="152.0" width="72.5" height="12" rx="1.5"><title>108: in the stream deque from ≈0.81 until popped at 1.311</title></rect>
+<rect class="st s" x="425.4" y="152.0" width="11.7" height="12" rx="1.5"><title>108: scheduler thread 1.311 → handoff 1.392</title></rect>
+<rect class="st h" x="437.1" y="152.0" width="2.0" height="12" rx="1.5"><title>108: handed to ResponseWorker 1.392, doorbell 1.406</title></rect>
+<rect class="bar cm" x="439.2" y="152.0" width="5.8" height="12" rx="1.5"><title>108: on device 1.406 → 1.446 (40 µs)</title></rect>
+<rect class="bar cmw" x="445.0" y="152.0" width="6.5" height="12" rx="1.5"><title>108: response 1.446, callback 1.471 → 1.491</title></rect>
+<line class="lane" x1="12" y1="194.0" x2="948" y2="194.0"/>
+<text class="tag cm" x="12" y="186.0">109</text>
+<text class="lab" x="46" y="186.0">H2D 512 B</text>
+<rect class="st q fuzzy" x="352.9" y="176.0" width="92.8" height="12" rx="1.5"><title>109: in the stream deque from ≈0.81 until popped at 1.451</title></rect>
+<rect class="st s" x="445.7" y="176.0" width="33.0" height="12" rx="1.5"><title>109: scheduler thread 1.451 → handoff 1.679</title></rect>
+<rect class="st h" x="478.7" y="176.0" width="1.5" height="12" rx="1.5"><title>109: handed to ResponseWorker 1.679, doorbell 1.687</title></rect>
+<rect class="bar cm" x="479.8" y="176.0" width="14.6" height="12" rx="1.5"><title>109: on device 1.687 → 1.788 (101 µs)</title></rect>
+<rect class="bar cmw" x="494.4" y="176.0" width="10.0" height="12" rx="1.5"><title>109: response 1.788, callback 1.806 → 1.857</title></rect>
+<line class="lane" x1="12" y1="218.0" x2="948" y2="218.0"/>
+<text class="tag cm" x="12" y="210.0">110</text>
+<text class="lab" x="46" y="210.0">sdsc_add_0</text>
+<rect class="st q fuzzy" x="352.9" y="200.0" width="130.2" height="12" rx="1.5"><title>110: in the stream deque from ≈0.81 until popped at 1.710</title></rect>
+<rect class="st s" x="483.2" y="200.0" width="38.8" height="12" rx="1.5"><title>110: scheduler thread 1.710 → handoff 1.978</title></rect>
+<rect class="st h" x="521.9" y="200.0" width="1.5" height="12" rx="1.5"><title>110: handed to ResponseWorker 1.978, doorbell 1.987</title></rect>
+<rect class="bar cm" x="523.2" y="200.0" width="3.6" height="12" rx="1.5"><title>110: on device 1.987 → 2.012 (25 µs)</title></rect>
+<rect class="bar cmw" x="526.9" y="200.0" width="7.8" height="12" rx="1.5"><title>110: response 2.012, callback 2.029 → 2.066</title></rect>
+<line class="lane" x1="12" y1="242.0" x2="948" y2="242.0"/>
+<text class="tag cm" x="12" y="234.0">111</text>
+<text class="lab" x="46" y="234.0">D2H 128 B</text>
+<rect class="st q fuzzy" x="352.9" y="224.0" width="178.3" height="12" rx="1.5"><title>111: in the stream deque from ≈0.81 until popped at 2.042</title></rect>
+<rect class="st s" x="531.2" y="224.0" width="17.5" height="12" rx="1.5"><title>111: scheduler thread 2.042 → handoff 2.163</title></rect>
+<rect class="st h" x="548.7" y="224.0" width="1.5" height="12" rx="1.5"><title>111: handed to ResponseWorker 2.163, doorbell 2.172</title></rect>
+<rect class="bar cm" x="550.0" y="224.0" width="3.8" height="12" rx="1.5"><title>111: on device 2.172 → 2.198 (26 µs)</title></rect>
+<rect class="bar cmw" x="553.8" y="224.0" width="15.0" height="12" rx="1.5"><title>111: response 2.198, callback 2.219 → 2.302</title></rect>
+<line class="lane" x1="12" y1="266.0" x2="948" y2="266.0"/>
+<text class="tag cm" x="12" y="258.0">112</text>
+<text class="lab" x="46" y="258.0">RDMA wait</text>
+<rect class="st q fuzzy" x="352.9" y="248.0" width="212.4" height="12" rx="1.5"><title>112: in the stream deque from ≈0.81 until popped at 2.278</title></rect>
+<rect class="st s" x="565.4" y="248.0" width="12.4" height="12" rx="1.5"><title>112: scheduler thread 2.278 → handoff 2.364</title></rect>
+<rect class="st h" x="577.8" y="248.0" width="2.9" height="12" rx="1.5"><title>112: handed to ResponseWorker 2.364, doorbell 2.384</title></rect>
+<rect class="bar cm" x="580.7" y="248.0" width="3.3" height="12" rx="1.5"><title>112: on device 2.384 → 2.407 (23 µs)</title></rect>
+<rect class="bar cmw" x="584.0" y="248.0" width="6.7" height="12" rx="1.5"><title>112: response 2.407, callback 2.428 → 2.453</title></rect>
+<line class="lane" x1="12" y1="290.0" x2="948" y2="290.0"/>
+<text class="tag cm" x="12" y="282.0">113</text>
+<text class="lab" x="46" y="282.0">comms_ws_end</text>
+<rect class="st q fuzzy" x="352.9" y="272.0" width="231.8" height="12" rx="1.5"><title>113: in the stream deque from ≈0.81 until popped at 2.412</title></rect>
+<rect class="st s" x="584.7" y="272.0" width="15.5" height="12" rx="1.5"><title>113: scheduler thread 2.412 → handoff 2.519</title></rect>
+<rect class="st h" x="600.2" y="272.0" width="1.5" height="12" rx="1.5"><title>113: handed to ResponseWorker 2.519, doorbell 2.527</title></rect>
+<rect class="bar cm" x="601.4" y="272.0" width="2.6" height="12" rx="1.5"><title>113: on device 2.527 → 2.545 (18 µs)</title></rect>
+<rect class="bar cmw" x="604.0" y="272.0" width="25.6" height="12" rx="1.5"><title>113: response 2.545, callback 2.629 → 2.722</title></rect>
+<line class="lane" x1="12" y1="324.0" x2="948" y2="324.0"/>
+<text class="tag acc" x="12" y="316.0">114</text>
+<text class="lab" x="46" y="316.0">H2D add_1 correction</text>
+<rect class="st q fuzzy" x="423.8" y="306.0" width="182.2" height="12" rx="1.5"><title>114: in the stream deque from ≈1.30 until popped at 2.559</title></rect>
+<rect class="st s" x="606.0" y="306.0" width="39.5" height="12" rx="1.5"><title>114: scheduler thread 2.559 → handoff 2.832</title></rect>
+<rect class="st b" x="608.3" y="306.0" width="17.7" height="12" rx="1.5"><title>114: issueBarrier waits 2.575 → 2.697 on 8 fence(s), the last from op 113</title></rect>
+<rect class="st h" x="645.5" y="306.0" width="1.5" height="12" rx="1.5"><title>114: handed to ResponseWorker 2.832, doorbell 2.839</title></rect>
+<rect class="bar acc" x="646.5" y="306.0" width="2.9" height="12" rx="1.5"><title>114: on device 2.839 → 2.859 (20 µs)</title></rect>
+<rect class="bar accw" x="649.4" y="306.0" width="10.1" height="12" rx="1.5"><title>114: response 2.859, callback 2.889 → 2.929</title></rect>
+<line class="lane" x1="12" y1="348.0" x2="948" y2="348.0"/>
+<text class="tag acc" x="12" y="340.0">115</text>
+<text class="lab" x="46" y="340.0">fused_add_1 (y+1)</text>
+<rect class="st q fuzzy" x="423.8" y="330.0" width="227.3" height="12" rx="1.5"><title>115: in the stream deque from ≈1.30 until popped at 2.871</title></rect>
+<rect class="st s" x="651.2" y="330.0" width="38.6" height="12" rx="1.5"><title>115: scheduler thread 2.871 → handoff 3.138</title></rect>
+<rect class="st b" x="664.6" y="330.0" width="4.3" height="12" rx="1.5"><title>115: issueBarrier waits 2.964 → 2.994 on 1 fence(s), the last from op 114</title></rect>
+<rect class="st h" x="689.8" y="330.0" width="1.6" height="12" rx="1.5"><title>115: handed to ResponseWorker 3.138, doorbell 3.149</title></rect>
+<rect class="bar acc" x="691.4" y="330.0" width="4.1" height="12" rx="1.5"><title>115: on device 3.149 → 3.177 (28 µs)</title></rect>
+<rect class="bar accw" x="695.4" y="330.0" width="14.6" height="12" rx="1.5"><title>115: response 3.177, callback 3.197 → 3.278</title></rect>
+<line class="lane" x1="12" y1="372.0" x2="948" y2="372.0"/>
+<text class="tag acc" x="12" y="364.0">116</text>
+<text class="lab" x="46" y="364.0">H2D add_2 correction</text>
+<rect class="st q fuzzy" x="452.8" y="354.0" width="243.0" height="12" rx="1.5"><title>116: in the stream deque from ≈1.50 until popped at 3.179</title></rect>
+<rect class="st s" x="695.7" y="354.0" width="31.4" height="12" rx="1.5"><title>116: scheduler thread 3.179 → handoff 3.396</title></rect>
+<rect class="st b" x="703.7" y="354.0" width="2.3" height="12" rx="1.5"><title>116: issueBarrier waits 3.234 → 3.250 on 1 fence(s), the last from op 115</title></rect>
+<rect class="st h" x="727.1" y="354.0" width="1.5" height="12" rx="1.5"><title>116: handed to ResponseWorker 3.396, doorbell 3.406</title></rect>
+<rect class="bar acc" x="728.6" y="354.0" width="4.5" height="12" rx="1.5"><title>116: on device 3.406 → 3.437 (31 µs)</title></rect>
+<rect class="bar accw" x="733.1" y="354.0" width="10.9" height="12" rx="1.5"><title>116: response 3.437, callback 3.488 → 3.512</title></rect>
+<line class="lane" x1="12" y1="396.0" x2="948" y2="396.0"/>
+<text class="tag acc" x="12" y="388.0">117</text>
+<text class="lab" x="46" y="388.0">fused_add_2</text>
+<rect class="st q fuzzy" x="452.8" y="378.0" width="281.3" height="12" rx="1.5"><title>117: in the stream deque from ≈1.50 until popped at 3.444</title></rect>
+<rect class="st s" x="734.1" y="378.0" width="46.2" height="12" rx="1.5"><title>117: scheduler thread 3.444 → handoff 3.763</title></rect>
+<rect class="st b" x="737.4" y="378.0" width="8.0" height="12" rx="1.5"><title>117: issueBarrier waits 3.467 → 3.522 on 1 fence(s), the last from op 116</title></rect>
+<rect class="st h" x="780.2" y="378.0" width="1.5" height="12" rx="1.5"><title>117: handed to ResponseWorker 3.763, doorbell 3.770</title></rect>
+<rect class="bar acc" x="781.3" y="378.0" width="2.9" height="12" rx="1.5"><title>117: on device 3.770 → 3.790 (20 µs)</title></rect>
+<rect class="bar accw" x="784.1" y="378.0" width="14.3" height="12" rx="1.5"><title>117: response 3.790, callback 3.868 → 3.889</title></rect>
+<line class="lane" x1="12" y1="420.0" x2="948" y2="420.0"/>
+<text class="tag acc" x="12" y="412.0">118</text>
+<text class="lab" x="46" y="412.0">D2H 256 B to CPU</text>
+<rect class="st q fuzzy" x="484.6" y="402.0" width="303.5" height="12" rx="1.5"><title>118: in the stream deque from ≈1.72 until popped at 3.817</title></rect>
+<rect class="st s" x="788.1" y="402.0" width="30.0" height="12" rx="1.5"><title>118: scheduler thread 3.817 → handoff 4.024</title></rect>
+<rect class="st b" x="791.0" y="402.0" width="10.3" height="12" rx="1.5"><title>118: issueBarrier waits 3.837 → 3.908 on 1 fence(s), the last from op 117</title></rect>
+<rect class="st h" x="818.0" y="402.0" width="1.5" height="12" rx="1.5"><title>118: handed to ResponseWorker 4.024, doorbell 4.034</title></rect>
+<rect class="bar acc" x="819.5" y="402.0" width="2.7" height="12" rx="1.5"><title>118: on device 4.034 → 4.053 (19 µs)</title></rect>
+<rect class="bar accw" x="822.2" y="402.0" width="14.2" height="12" rx="1.5"><title>118: response 4.053, callback 4.101 → 4.151</title></rect>
+<line class="lane strong" x1="12" y1="117.0" x2="948" y2="117.0"/>
+<line class="lane strong" x1="12" y1="295.0" x2="948" y2="295.0"/>
+<path class="edge bad" d="M293.7,82.0 C293.7,91.0 305.2,84.0 305.2,93.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M616.1,284.0 C616.1,303.0 626.0,286.0 626.0,305.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M653.8,318.0 C653.8,327.0 669.0,320.0 669.0,329.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M698.3,342.0 C698.3,351.0 706.0,344.0 706.0,353.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M740.4,366.0 C740.4,375.0 745.4,368.0 745.4,377.0" marker-end="url(#fa)"/>
+<path class="edge bad" d="M795.4,390.0 C795.4,399.0 801.2,392.0 801.2,401.0" marker-end="url(#fa)"/>
+<circle class="badge" cx="392.9" cy="100.0" r="8"/><text class="badgen" x="392.9" y="103.8" text-anchor="middle">1</text>
+<circle class="badge" cx="347.9" cy="134.0" r="8"/><text class="badgen" x="347.9" y="137.8" text-anchor="middle">2</text>
+<circle class="badge" cx="526.1" cy="182.0" r="8"/><text class="badgen" x="526.1" y="185.8" text-anchor="middle">3</text>
+<circle class="badge" cx="591.0" cy="312.0" r="8"/><text class="badgen" x="591.0" y="315.8" text-anchor="middle">4</text>
+<circle class="badge" cx="858.1" cy="408.0" r="8"/><text class="badgen" x="858.1" y="411.8" text-anchor="middle">5</text>
+<line class="lane" x1="12" y1="488.0" x2="948" y2="488.0"/>
+<text class="t1" x="12" y="466.0">Python thread</text><text class="t2" x="12" y="481.0">run · push · sync</text>
+<line class="lane" x1="12" y1="526.0" x2="948" y2="526.0"/>
+<text class="t1" x="12" y="504.0">scheduler thread</text><text class="t2" x="12" y="519.0">pops ops, barriers</text>
+<line class="lane" x1="12" y1="564.0" x2="948" y2="564.0"/>
+<text class="t1" x="12" y="542.0">ResponseWorker</text><text class="t2" x="12" y="557.0">doorbell, callbacks</text>
+<line class="lane" x1="12" y1="602.0" x2="948" y2="602.0"/>
+<text class="t1" x="12" y="580.0">device</text><text class="t2" x="12" y="595.0">doorbell → response</text>
+<line class="lane strong" x1="12" y1="442.0" x2="948" y2="442.0"/>
+<rect class="bar ink" x="235.7" y="463.0" width="40.8" height="12" rx="1.5"><title>allreduce_run: WorkSchedule new, allocDev, start(), global slot, LaunchAll</title></rect>
+<rect class="bar cmw" x="276.5" y="463.0" width="143.4" height="12" rx="1.5"><title>allreduce_run: LaunchAll records and accumulates the ops; returns at 1.273, after 107's callback</title></rect>
+<rect class="bar ink" x="419.9" y="463.0" width="67.9" height="12" rx="1.5"><title>fused_add_1.run, wait_work (returns at once), fused_add_2.run, .to('cpu')</title></rect>
+<rect class="bar accw" x="487.8" y="463.0" width="350.8" height="12" rx="1.5"><title>RuntimeStream::synchronize(): blocked until in_flight and queued reach 0</title></rect>
+<text class="lab cm inbar" x="282.5" y="473.0">allreduce_run</text>
+<text class="lab acc inbar" x="493.8" y="473.0">synchronize() blocks</text>
+<path class="pushm" d="M227.4,462.0 L235.4,462.0 L231.4,455.0 z"/>
+<path class="pushm" d="M348.9,462.0 L356.9,462.0 L352.9,455.0 z"/>
+<path class="pushm" d="M419.8,462.0 L427.8,462.0 L423.8,455.0 z"/>
+<path class="pushm" d="M448.8,462.0 L456.8,462.0 L452.8,455.0 z"/>
+<path class="pushm" d="M480.6,462.0 L488.6,462.0 L484.6,455.0 z"/>
+<rect class="st s" x="231.7" y="501.0" width="41.7" height="12" rx="1.5"><title>105: scheduler thread</title></rect>
+<rect class="st s" x="280.7" y="501.0" width="76.0" height="12" rx="1.5"><title>106: scheduler thread</title></rect>
+<rect class="st b" x="282.7" y="501.0" width="22.4" height="12" rx="1.5"><title>106: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="389.1" y="501.0" width="8.1" height="12" rx="1.5"><title>107: scheduler thread</title></rect>
+<rect class="st s" x="425.4" y="501.0" width="11.7" height="12" rx="1.5"><title>108: scheduler thread</title></rect>
+<rect class="st s" x="445.7" y="501.0" width="33.0" height="12" rx="1.5"><title>109: scheduler thread</title></rect>
+<rect class="st s" x="483.2" y="501.0" width="38.8" height="12" rx="1.5"><title>110: scheduler thread</title></rect>
+<rect class="st s" x="531.2" y="501.0" width="17.5" height="12" rx="1.5"><title>111: scheduler thread</title></rect>
+<rect class="st s" x="565.4" y="501.0" width="12.4" height="12" rx="1.5"><title>112: scheduler thread</title></rect>
+<rect class="st s" x="584.7" y="501.0" width="15.5" height="12" rx="1.5"><title>113: scheduler thread</title></rect>
+<rect class="st s" x="606.0" y="501.0" width="39.5" height="12" rx="1.5"><title>114: scheduler thread</title></rect>
+<rect class="st b" x="608.3" y="501.0" width="17.7" height="12" rx="1.5"><title>114: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="651.2" y="501.0" width="38.6" height="12" rx="1.5"><title>115: scheduler thread</title></rect>
+<rect class="st b" x="664.6" y="501.0" width="4.3" height="12" rx="1.5"><title>115: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="695.7" y="501.0" width="31.4" height="12" rx="1.5"><title>116: scheduler thread</title></rect>
+<rect class="st b" x="703.7" y="501.0" width="2.3" height="12" rx="1.5"><title>116: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="734.1" y="501.0" width="46.2" height="12" rx="1.5"><title>117: scheduler thread</title></rect>
+<rect class="st b" x="737.4" y="501.0" width="8.0" height="12" rx="1.5"><title>117: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st s" x="788.1" y="501.0" width="30.0" height="12" rx="1.5"><title>118: scheduler thread</title></rect>
+<rect class="st b" x="791.0" y="501.0" width="10.3" height="12" rx="1.5"><title>118: issueBarrier blocks the scheduler thread</title></rect>
+<rect class="st h" x="273.3" y="539.0" width="5.1" height="12" rx="1.5"><title>105: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="285.6" y="539.0" width="16.8" height="12" rx="1.5"><title>105: response → callback done</title></rect>
+<rect class="st h" x="356.7" y="539.0" width="6.4" height="12" rx="1.5"><title>106: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="366.2" y="539.0" width="9.3" height="12" rx="1.5"><title>106: response → callback done</title></rect>
+<rect class="st h" x="397.2" y="539.0" width="1.5" height="12" rx="1.5"><title>107: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="401.3" y="539.0" width="14.5" height="12" rx="1.5"><title>107: response → callback done</title></rect>
+<rect class="st h" x="437.1" y="539.0" width="2.0" height="12" rx="1.5"><title>108: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="445.0" y="539.0" width="6.5" height="12" rx="1.5"><title>108: response → callback done</title></rect>
+<rect class="st h" x="478.7" y="539.0" width="1.5" height="12" rx="1.5"><title>109: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="494.4" y="539.0" width="10.0" height="12" rx="1.5"><title>109: response → callback done</title></rect>
+<rect class="st h" x="521.9" y="539.0" width="1.5" height="12" rx="1.5"><title>110: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="526.9" y="539.0" width="7.8" height="12" rx="1.5"><title>110: response → callback done</title></rect>
+<rect class="st h" x="548.7" y="539.0" width="1.5" height="12" rx="1.5"><title>111: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="553.8" y="539.0" width="15.0" height="12" rx="1.5"><title>111: response → callback done</title></rect>
+<rect class="st h" x="577.8" y="539.0" width="2.9" height="12" rx="1.5"><title>112: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="584.0" y="539.0" width="6.7" height="12" rx="1.5"><title>112: response → callback done</title></rect>
+<rect class="st h" x="600.2" y="539.0" width="1.5" height="12" rx="1.5"><title>113: send CB, ring doorbell</title></rect>
+<rect class="bar cmw" x="604.0" y="539.0" width="25.6" height="12" rx="1.5"><title>113: response → callback done</title></rect>
+<rect class="st h" x="645.5" y="539.0" width="1.5" height="12" rx="1.5"><title>114: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="649.4" y="539.0" width="10.1" height="12" rx="1.5"><title>114: response → callback done</title></rect>
+<rect class="st h" x="689.8" y="539.0" width="1.6" height="12" rx="1.5"><title>115: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="695.4" y="539.0" width="14.6" height="12" rx="1.5"><title>115: response → callback done</title></rect>
+<rect class="st h" x="727.1" y="539.0" width="1.5" height="12" rx="1.5"><title>116: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="733.1" y="539.0" width="10.9" height="12" rx="1.5"><title>116: response → callback done</title></rect>
+<rect class="st h" x="780.2" y="539.0" width="1.5" height="12" rx="1.5"><title>117: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="784.1" y="539.0" width="14.3" height="12" rx="1.5"><title>117: response → callback done</title></rect>
+<rect class="st h" x="818.0" y="539.0" width="1.5" height="12" rx="1.5"><title>118: send CB, ring doorbell</title></rect>
+<rect class="bar accw" x="822.2" y="539.0" width="14.2" height="12" rx="1.5"><title>118: response → callback done</title></rect>
+<rect class="bar acc" x="278.4" y="577.0" width="7.2" height="12" rx="1.5"><title>105: on device</title></rect>
+<rect class="bar acc" x="363.0" y="577.0" width="3.2" height="12" rx="1.5"><title>106: on device</title></rect>
+<rect class="bar cm" x="398.5" y="577.0" width="2.7" height="12" rx="1.5"><title>107: on device</title></rect>
+<rect class="bar cm" x="439.2" y="577.0" width="5.8" height="12" rx="1.5"><title>108: on device</title></rect>
+<rect class="bar cm" x="479.8" y="577.0" width="14.6" height="12" rx="1.5"><title>109: on device</title></rect>
+<rect class="bar cm" x="523.2" y="577.0" width="3.6" height="12" rx="1.5"><title>110: on device</title></rect>
+<rect class="bar cm" x="550.0" y="577.0" width="3.8" height="12" rx="1.5"><title>111: on device</title></rect>
+<rect class="bar cm" x="580.7" y="577.0" width="3.3" height="12" rx="1.5"><title>112: on device</title></rect>
+<rect class="bar cm" x="601.4" y="577.0" width="2.6" height="12" rx="1.5"><title>113: on device</title></rect>
+<rect class="bar acc" x="646.5" y="577.0" width="2.9" height="12" rx="1.5"><title>114: on device</title></rect>
+<rect class="bar acc" x="691.4" y="577.0" width="4.1" height="12" rx="1.5"><title>115: on device</title></rect>
+<rect class="bar acc" x="728.6" y="577.0" width="4.5" height="12" rx="1.5"><title>116: on device</title></rect>
+<rect class="bar acc" x="781.3" y="577.0" width="2.9" height="12" rx="1.5"><title>117: on device</title></rect>
+<rect class="bar acc" x="819.5" y="577.0" width="2.7" height="12" rx="1.5"><title>118: on device</title></rect>
+</svg>
